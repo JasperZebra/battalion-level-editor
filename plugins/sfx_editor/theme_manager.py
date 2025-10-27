@@ -7,289 +7,295 @@ class ThemeManager:
         self.colors = self.define_colors()
     
     def define_colors(self):
-        """Define a color palette inspired by Battalion Wars 2"""
+        """Define a modern, clean color palette"""
         return {
-            'background': '#2A2C2E',       # Dark gray background
-            'foreground': '#FFFFFF',       # White text
-            'accent1': '#D82800',          # Red accent (for buttons, highlights)
-            'accent2': '#FFB300',          # Yellow accent (for titles, important elements)
-            'accent3': '#45A018',          # Green accent
-            'accent4': '#2F95D8',          # Blue accent
-            'accent5': '#B34D80',          # Purple accent
-            'border': '#000000',           # Black borders
-            'input_bg': '#3A3C3E',         # Slightly lighter gray for inputs
-            'button_bg': '#D82800',        # Red buttons
-            'button_fg': '#FFFFFF',        # White text on buttons
-            'button_pressed': '#A01800',   # Darker red when pressed
-            'title_bg': '#3F3F3F',         # Title background
-            'status_bg': '#333537',        # Status bar background
+            # Main colors - softer, more modern palette
+            'background': '#1E1E2E',       # Deep blue-gray background
+            'foreground': '#CDD6F4',       # Soft white text
+            'surface': '#313244',          # Elevated surface color
+            'surface_light': '#45475A',    # Lighter surface for hover
             
-            # Tab colors
-            'tab_bg': '#282A2C',           # Tab background
-            'tab_fg': '#AAAAAA',           # Tab text
-            'tab_selected_bg': '#3A3C3E',  # Selected tab background
-            'tab_selected_fg': '#FFFFFF',  # Selected tab text
+            # Accent colors - vibrant but not harsh
+            'primary': '#89B4FA',          # Soft blue (primary actions)
+            'secondary': '#F5C2E7',        # Soft pink (secondary)
+            'success': '#A6E3A1',          # Soft green (success/apply)
+            'warning': '#FAB387',          # Soft orange (warnings)
+            'error': '#F38BA8',            # Soft red (errors)
+            'info': '#94E2D5',             # Soft cyan (info)
             
-            # Specific tab colors
-            'color_tab_bg': '#4A2626',     # Color tab background
-            'size_tab_bg': '#263D26',      # Size tab background
-            'emission_tab_bg': '#263344',  # Emission tab background
-            'movement_tab_bg': '#44332C',  # Movement tab background
-            'visual_tab_bg': '#3D2645',    # Visual tab background
-            'trail_tab_bg': '#2A4044',     # Trail tab background
+            # UI element colors
+            'border': '#585B70',           # Subtle borders
+            'input_bg': '#313244',         # Input backgrounds
+            'input_border': '#585B70',     # Input borders
+            'button_hover': '#6C7086',     # Button hover state
+            'title_bg': '#181825',         # Title background (darker)
+            'status_bg': '#181825',        # Status bar background
+            
+            # Text colors
+            'text_primary': '#CDD6F4',     # Primary text
+            'text_secondary': '#BAC2DE',   # Secondary text
+            'text_muted': '#6C7086',       # Muted text
+            
+            # Tab colors - subtle variations
+            'tab_bg': '#313244',
+            'tab_fg': '#BAC2DE',
+            'tab_selected_bg': '#45475A',
+            'tab_selected_fg': '#CDD6F4',
+            'tab_hover': '#3E4051',
+            
+            # Color-specific backgrounds for sliders
+            'red_bg': '#2D1B1B',
+            'green_bg': '#1B2D1B',
+            'blue_bg': '#1B1B2D',
+            'alpha_bg': '#252525',
         }
     
     def setup_theme(self):
-        """Configure Battalion Wars 2 inspired styling for the application"""
-        # Create a style object
+        """Configure modern, clean styling for the application"""
         style = ttk.Style()
-        
-        # Use clam theme as base
         style.theme_use('clam')
+        
+        c = self.colors  # Shorthand for colors
 
-        # GLOBAL STYLE CONFIGURATION
+        # GLOBAL CONFIGURATION
         style.configure('.',
-            background=self.colors['background'],
-            foreground=self.colors['foreground'],
-            fieldbackground=self.colors['input_bg'],
-            troughcolor=self.colors['background'],
-            borderwidth=2,
-            font=('Arial Black', 10)  # Bold, military-like font
+            background=c['background'],
+            foreground=c['foreground'],
+            fieldbackground=c['input_bg'],
+            troughcolor=c['input_bg'],
+            borderwidth=0,
+            font=('Segoe UI', 10)
         )
 
-        # FRAME STYLING
-        style.configure('Military.TFrame',
-            background=self.colors['background']
-        )
-        
-        style.configure('TitleBG.TFrame',
-            background=self.colors['title_bg']
-        )
-        
-        style.configure('Preview.TFrame',
-            background=self.colors['background']
-        )
-        
-        style.configure('PreviewBorder.TFrame',
-            background=self.colors['accent2'],
-            borderwidth=2,
-            relief='solid'
-        )
-        
-        # Colored label frames for RGB sliders
-        style.configure('RedLabel.TFrame',
-            background=self.colors['accent1'],
-            borderwidth=2,
-            relief='solid'
-        )
-        
-        style.configure('GreenLabel.TFrame',
-            background=self.colors['accent3'],
-            borderwidth=2,
-            relief='solid'
-        )
-        
-        style.configure('BlueLabel.TFrame',
-            background=self.colors['accent4'],
-            borderwidth=2,
-            relief='solid'
-        )
-        
-        style.configure('AlphaLabel.TFrame',
-            background='#8F8F8F',
-            borderwidth=2,
-            relief='solid'
-        )
-
-        # LABEL FRAME STYLING
-        style.configure('Military.TLabelframe',
-            background=self.colors['background'],
-            bordercolor=self.colors['accent2'],
-            borderwidth=3
-        )
-        style.configure('Military.TLabelframe.Label',
-            background=self.colors['background'],
-            foreground=self.colors['accent2'],
-            font=('Arial Black', 11)
-        )
-
-        # BUTTON STYLING - Military style
-        style.configure('Military.TButton',
-            background=self.colors['button_bg'],
-            foreground=self.colors['button_fg'],
-            bordercolor=self.colors['border'],
-            borderwidth=2,
-            relief='raised',
-            padding=6,
-            font=('Arial Black', 9)
-        )
-        style.map('Military.TButton',
-            background=[('pressed', self.colors['button_pressed']), ('active', self.colors['button_pressed'])],
-            foreground=[('pressed', self.colors['button_fg']), ('active', self.colors['button_fg'])]
-        )
-        
-        # "Deploy" button - special styling
-        style.configure('Deploy.TButton',
-            background=self.colors['accent3'],  # Green for "Deploy"
-            foreground=self.colors['button_fg'],
-            bordercolor=self.colors['border'],
-            borderwidth=2,
-            relief='raised',
-            padding=6,
-            font=('Arial Black', 10)
-        )
-        style.map('Deploy.TButton',
-            background=[('pressed', '#2F7010'), ('active', '#3A8818')],
-            foreground=[('pressed', self.colors['button_fg']), ('active', self.colors['button_fg'])]
-        )
-
-        # LABEL STYLING
-        style.configure('Military.TLabel',
-            background=self.colors['background'],
-            foreground=self.colors['foreground'],
-            font=('Arial Black', 9)
-        )
-        
-        # Title style
-        style.configure('Title.TLabel', 
-            background=self.colors['title_bg'],
-            foreground=self.colors['accent2'],
-            font=('Arial Black', 16),
-            anchor='center'
-        )
-        
-        # Value label style
-        style.configure('Value.TLabel', 
-            background=self.colors['background'],
-            foreground=self.colors['accent2'],
-            font=('Arial Black', 10)
-        )
-        
-        # Value header style
-        style.configure('ValueHeader.TLabel', 
-            background=self.colors['background'],
-            foreground='#AAAAAA',
-            font=('Arial Black', 10)
-        )
-        
-        # Description style
-        style.configure('Desc.TLabel', 
-            background=self.colors['background'],
-            foreground='#CCCCCC',
-            font=('Arial', 9)
-        )
-        
-        # File text label
-        style.configure('FileText.TLabel', 
-            background=self.colors['background'],
-            foreground='#CCCCCC',
-            font=('Arial', 10)
-        )
-        
-        # Status bar styling
-        style.configure('Status.TFrame',
-            background=self.colors['status_bg'],
-            relief='sunken'
-        )
-        
-        style.configure('Status.TLabel', 
-            background=self.colors['status_bg'],
-            foreground='#AAAAAA',
-            font=('Arial', 9),
-            padding=3
-        )
-
-        # SCALE (SLIDER) STYLING
-        style.configure('TScale',
-            background=self.colors['background'],
-            troughcolor=self.colors['input_bg'],
-            bordercolor=self.colors['accent2'],
-            lightcolor=self.colors['accent1'],
-            darkcolor=self.colors['accent1']
-        )
-        
-        # Custom slider styles for each color
-        style.configure('Red.Horizontal.TScale',
-            background=self.colors['background'],
-            troughcolor='#401010',
-            bordercolor=self.colors['accent1']
-        )
-        
-        style.configure('Green.Horizontal.TScale',
-            background=self.colors['background'],
-            troughcolor='#104010',
-            bordercolor=self.colors['accent3']
-        )
-        
-        style.configure('Blue.Horizontal.TScale',
-            background=self.colors['background'],
-            troughcolor='#102040',
-            bordercolor=self.colors['accent4']
-        )
-        
-        style.configure('Alpha.Horizontal.TScale',
-            background=self.colors['background'],
-            troughcolor='#303030',
-            bordercolor='#8F8F8F'
-        )
-
-        # COMBOBOX STYLING
-        style.configure('TCombobox',
-            background=self.colors['input_bg'],
-            foreground=self.colors['foreground'],
-            fieldbackground=self.colors['input_bg'],
-            arrowcolor=self.colors['accent2']
-        )
-        style.map('TCombobox',
-            fieldbackground=[('readonly', self.colors['input_bg'])],
-            foreground=[('readonly', self.colors['foreground'])]
-        )
-
-        # NOTEBOOK STYLING (for tabs)
-        style.configure('TNotebook',
-            background=self.colors['background'],
+        # FRAME STYLING - Modern flat design
+        style.configure('TFrame',
+            background=c['background'],
             borderwidth=0
         )
         
+        style.configure('Card.TFrame',
+            background=c['surface'],
+            borderwidth=0,
+            relief='flat'
+        )
+        
+        style.configure('TitleBG.TFrame',
+            background=c['title_bg']
+        )
+
+        # LABEL FRAME STYLING - Modern card style
+        style.configure('TLabelframe',
+            background=c['background'],
+            bordercolor=c['border'],
+            borderwidth=1,
+            relief='flat'
+        )
+        style.configure('TLabelframe.Label',
+            background=c['background'],
+            foreground=c['primary'],
+            font=('Segoe UI Semibold', 11)
+        )
+        
+        # Card style label frames
+        style.configure('Card.TLabelframe',
+            background=c['surface'],
+            bordercolor=c['border'],
+            borderwidth=1,
+            relief='flat'
+        )
+        style.configure('Card.TLabelframe.Label',
+            background=c['surface'],
+            foreground=c['primary'],
+            font=('Segoe UI Semibold', 11)
+        )
+
+        # BUTTON STYLING - Modern flat buttons
+        style.configure('TButton',
+            background=c['surface'],
+            foreground=c['text_primary'],
+            bordercolor=c['border'],
+            borderwidth=1,
+            relief='flat',
+            padding=(12, 8),
+            font=('Segoe UI Semibold', 10)
+        )
+        style.map('TButton',
+            background=[('pressed', c['button_hover']), ('active', c['surface_light'])],
+            bordercolor=[('active', c['primary'])]
+        )
+        
+        # Primary button (Apply/Save actions)
+        style.configure('Primary.TButton',
+            background=c['success'],
+            foreground=c['background'],
+            borderwidth=0,
+            relief='flat',
+            padding=(16, 10),
+            font=('Segoe UI Semibold', 11)
+        )
+        style.map('Primary.TButton',
+            background=[('pressed', '#8DD889'), ('active', '#B5F0B1')]
+        )
+        
+        # Secondary button
+        style.configure('Secondary.TButton',
+            background=c['primary'],
+            foreground=c['background'],
+            borderwidth=0,
+            relief='flat',
+            padding=(12, 8),
+            font=('Segoe UI Semibold', 10)
+        )
+        style.map('Secondary.TButton',
+            background=[('pressed', '#6C9FE8'), ('active', '#A5C7FA')]
+        )
+
+        # LABEL STYLING - Modern typography
+        style.configure('TLabel',
+            background=c['background'],
+            foreground=c['text_primary'],
+            font=('Segoe UI', 10)
+        )
+        
+        # Title
+        style.configure('Title.TLabel', 
+            background=c['title_bg'],
+            foreground=c['primary'],
+            font=('Segoe UI', 22, 'bold'),
+            anchor='center'
+        )
+        
+        # Subtitle
+        style.configure('Subtitle.TLabel', 
+            background=c['background'],
+            foreground=c['text_secondary'],
+            font=('Segoe UI', 12),
+            anchor='center'
+        )
+        
+        # Value labels (for slider values)
+        style.configure('Value.TLabel', 
+            background=c['background'],
+            foreground=c['primary'],
+            font=('Segoe UI Semibold', 11)
+        )
+        
+        # Section headers
+        style.configure('Header.TLabel', 
+            background=c['background'],
+            foreground=c['text_primary'],
+            font=('Segoe UI Semibold', 10)
+        )
+        
+        # Muted text
+        style.configure('Muted.TLabel', 
+            background=c['background'],
+            foreground=c['text_muted'],
+            font=('Segoe UI', 9)
+        )
+        
+        # Status bar
+        style.configure('Status.TFrame',
+            background=c['status_bg'],
+            relief='flat'
+        )
+        
+        style.configure('Status.TLabel', 
+            background=c['status_bg'],
+            foreground=c['text_secondary'],
+            font=('Segoe UI', 9),
+            padding=5
+        )
+
+        # SCALE (SLIDER) STYLING - Modern minimal design
+        style.configure('TScale',
+            background=c['background'],
+            troughcolor=c['input_bg'],
+            bordercolor=c['border'],
+            borderwidth=0,
+            sliderrelief='flat'
+        )
+        
+        # Color-specific sliders
+        style.configure('Red.Horizontal.TScale',
+            background=c['background'],
+            troughcolor=c['red_bg'],
+            borderwidth=0,
+            sliderrelief='flat'
+        )
+        
+        style.configure('Green.Horizontal.TScale',
+            background=c['background'],
+            troughcolor=c['green_bg'],
+            borderwidth=0,
+            sliderrelief='flat'
+        )
+        
+        style.configure('Blue.Horizontal.TScale',
+            background=c['background'],
+            troughcolor=c['blue_bg'],
+            borderwidth=0,
+            sliderrelief='flat'
+        )
+        
+        style.configure('Alpha.Horizontal.TScale',
+            background=c['background'],
+            troughcolor=c['alpha_bg'],
+            borderwidth=0,
+            sliderrelief='flat'
+        )
+
+        # COMBOBOX STYLING - Modern dropdown
+        style.configure('TCombobox',
+            background=c['input_bg'],
+            foreground=c['text_primary'],
+            fieldbackground=c['input_bg'],
+            arrowcolor=c['primary'],
+            borderwidth=1,
+            bordercolor=c['border']
+        )
+        style.map('TCombobox',
+            fieldbackground=[('readonly', c['input_bg'])],
+            foreground=[('readonly', c['text_primary'])],
+            bordercolor=[('focus', c['primary'])]
+        )
+
+        # NOTEBOOK (TABS) STYLING - Modern tab design
+        style.configure('TNotebook',
+            background=c['background'],
+            borderwidth=0,
+            tabmargins=[0, 5, 0, 0]
+        )
+        
         style.configure('TNotebook.Tab',
-            background=self.colors['tab_bg'],
-            foreground=self.colors['tab_fg'],
-            padding=[10, 5],
-            font=('Arial Black', 9)
+            background=c['tab_bg'],
+            foreground=c['tab_fg'],
+            padding=[20, 10],
+            borderwidth=0,
+            font=('Segoe UI Semibold', 10)
         )
         
         style.map('TNotebook.Tab',
-            background=[('selected', self.colors['tab_selected_bg'])],
-            foreground=[('selected', self.colors['tab_selected_fg'])],
+            background=[
+                ('selected', c['tab_selected_bg']),
+                ('active', c['tab_hover'])
+            ],
+            foreground=[('selected', c['tab_selected_fg'])],
             expand=[('selected', [1, 1, 1, 0])]
         )
-        
-        # Custom tab styles for each category
-        style.configure('Color.TFrame', 
-            background=self.colors['color_tab_bg']
+
+        # SCROLLBAR STYLING - Modern thin scrollbar
+        style.configure('TScrollbar',
+            background=c['surface'],
+            troughcolor=c['background'],
+            borderwidth=0,
+            arrowsize=12
         )
-        
-        style.configure('Size.TFrame', 
-            background=self.colors['size_tab_bg']
-        )
-        
-        style.configure('Emission.TFrame', 
-            background=self.colors['emission_tab_bg']
-        )
-        
-        style.configure('Movement.TFrame', 
-            background=self.colors['movement_tab_bg']
-        )
-        
-        style.configure('Visual.TFrame', 
-            background=self.colors['visual_tab_bg']
-        )
-        
-        style.configure('Trail.TFrame', 
-            background=self.colors['trail_tab_bg']
+        style.map('TScrollbar',
+            background=[('active', c['surface_light'])]
         )
 
-        # ROOT WINDOW BACKGROUND
-        self.root.configure(bg=self.colors['background'])
+        # ROOT WINDOW
+        self.root.configure(bg=c['background'])
 
         return style, self.colors

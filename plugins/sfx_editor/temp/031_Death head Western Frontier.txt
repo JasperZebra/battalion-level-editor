@@ -1,0 +1,234 @@
+ParticleSystemEd_File_(C)2004_Kuju_Ltd
+File_Version 2.000000
+Num_Particle_Descriptors 7
+Particle_Descriptor_Type 5
+Particle_Descriptor_Name 031_(colour range) green gradient
+Start_Red NUMBER_VERSION_2
+****1: 0.200000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Start_Green NUMBER_VERSION_2
+****1: 0.300000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Start_Blue NUMBER_VERSION_2
+****1: 0.200000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Start_Alpha NUMBER_VERSION_2
+****1: 1.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+End_Red NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+End_Green NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+End_Blue NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+End_Alpha NUMBER_VERSION_2
+****1: 1.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transition_Red NUMBER_VERSION_2
+****1: 0.500000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transition_Green NUMBER_VERSION_2
+****1: 0.600000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transition_Blue NUMBER_VERSION_2
+****1: 0.500000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transition_Alpha NUMBER_VERSION_2
+****1: 1.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Use_End 1
+Use_Transition 1
+Transition_Point 0.500000
+*****************************************************************
+Particle_Descriptor_Type 5
+Particle_Descriptor_Name 031_(colour range) mid green
+Start_Red NUMBER_VERSION_2
+****1: 0.200000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Start_Green NUMBER_VERSION_2
+****1: 0.500000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Start_Blue NUMBER_VERSION_2
+****1: 0.200000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Start_Alpha NUMBER_VERSION_2
+****1: 1.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+End_Red NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+End_Green NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+End_Blue NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+End_Alpha NUMBER_VERSION_2
+****1: 1.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transition_Red NUMBER_VERSION_2
+****1: 0.200000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transition_Green NUMBER_VERSION_2
+****1: 0.500000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transition_Blue NUMBER_VERSION_2
+****1: 0.200000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transition_Alpha NUMBER_VERSION_2
+****1: 1.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Use_End 1
+Use_Transition 1
+Transition_Point 0.800000
+*****************************************************************
+Particle_Descriptor_Type 2
+Particle_Descriptor_Name 031_(emitter) stars
+Emit_Per_Turn NUMBER_VERSION_2
+****1: 0.250000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Life 35
+Particle_Descriptor 031_(particle) stars
+Initial_Velocity_X NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Initial_Velocity_Y NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Initial_Velocity_Z NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Velocity_Randomness NUMBER_VERSION_2
+****1: 0.030000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Transmit_Life 0
+Transmit_FoR 0
+Transmit_Velocity NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Interpolated_Emission 0
+Transmit_FoR_Velocity NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Shape 031_(shape) sphere
+Pass_Num_Particles 1
+Outward_Velocity NUMBER_VERSION_2
+****1: 0.010000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Mover NONE
+Emit_Per_Metre -1.000000
+*****************************************************************
+Particle_Descriptor_Type 1
+Particle_Descriptor_Name 031_(particle) skull
+Radius NUMBER_VERSION_2
+****1: 0.300000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Final_Radius 3.700000
+Life 75
+Life_Pct 1.000000
+GravityScalar -0.005000
+Blend_Mode 0
+Texture SFX_watersplash.ace
+Bounce 0
+Fade_Col 0
+Modifier NONE
+Colour_Range 031_(colour range) mid green
+Texture_Number 6
+Texture_Size 2
+Velocity_Damp 1.000000
+Axis_Aligned 0
+Anim_Type 0
+End_Frame 0
+Anim_Speed 1.000000
+Random_Start_Frame 0
+Length NUMBER_VERSION_2
+****1: 1.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+2D 0
+Rotation NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Position_From_Bottom 1
+Sorted 0
+Render_Order 0
+LOD_Bias 1.000000
+Fade_Large_Particles 1
+Wrapping_Box -1.000000
+Wrapping_Box_Alpha_Band 0.000000
+*****************************************************************
+Particle_Descriptor_Type 1
+Particle_Descriptor_Name 031_(particle) stars
+Radius NUMBER_VERSION_2
+****1: 0.100000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Final_Radius 2.500000
+Life 45
+Life_Pct 1.000000
+GravityScalar -0.010000
+Blend_Mode 0
+Texture SFX_ground_bits.ace
+Bounce 0
+Fade_Col 1
+Modifier NONE
+Colour_Range 031_(colour range) green gradient
+Texture_Number 10
+Texture_Size 2
+Velocity_Damp 1.000000
+Axis_Aligned 0
+Anim_Type 0
+End_Frame 0
+Anim_Speed 1.000000
+Random_Start_Frame 0
+Length NUMBER_VERSION_2
+****1: 1.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+2D 0
+Rotation NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Position_From_Bottom 0
+Sorted 0
+Render_Order 0
+LOD_Bias 1.000000
+Fade_Large_Particles 1
+Wrapping_Box -1.000000
+Wrapping_Box_Alpha_Band 0.000000
+*****************************************************************
+Particle_Descriptor_Type 7
+Particle_Descriptor_Name 031_(shape) sphere
+Type 1
+Ring_Axis 2
+Hemisphere 1
+Num_Particles 1
+Radius NUMBER_VERSION_2
+****1: 0.200000 NONE
+****2: 0 14.000000 0 1.000000 0 0.000000
+Hollow 1
+RandomSX 1.000000
+RandomSY 1.000000
+RandomSZ 1.000000
+Pos_X NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Pos_Y NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+Pos_Z NUMBER_VERSION_2
+****1: 0.000000 NONE
+****2: 0 100.000000 0 1.000000 0 0.000000
+*****************************************************************
+Particle_Descriptor_Type 6
+Particle_Descriptor_Name 031_Death head Western Frontier
+Num_Entries 2
+Sorted 0
+Render_Order 0
+Particle_Descriptor 031_(emitter) stars
+Time 0
+Transmit_FoR 1
+Particle_Descriptor 031_(particle) skull
+Time 0
+Transmit_FoR 1
+*****************************************************************
