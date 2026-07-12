@@ -4,6 +4,9 @@ import traceback
 __version__ = '2.4.0.0'
 
 import os
+# The editor uses paths relative to its own folder (e.g. "lib/color_coding.json"),
+# so make sure the working directory is this script's folder no matter how it's launched.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import multiprocessing
 from timeit import default_timer
 from copy import deepcopy
