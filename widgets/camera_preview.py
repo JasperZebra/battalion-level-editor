@@ -122,11 +122,11 @@ class WaypointChain(object):
 
 
 class UnitRoute(object):
-    """A scripted unit movement (FollowWaypoint): walk a polyline at a speed."""
-    def __init__(self, start_time, start_pos, chain, speed):
+    """A scripted unit movement: walk a polyline at a speed."""
+    def __init__(self, start_time, start_pos, points, speed):
         self.start_time = start_time
         self.speed = speed if speed > 0.01 else 5.0
-        self.points = [start_pos] + [node[0] for node in chain.nodes]
+        self.points = [start_pos] + list(points)
         self.lengths = []
         total = 0.0
         for i in range(len(self.points) - 1):
@@ -181,12 +181,17 @@ class CutsceneTimeline(object):
     RE_SETFOV = re.compile(r"CameraSetFOV\(\s*([\w.]+)\s*,\s*([0-9.]+)")
     RE_FADE = re.compile(r"CameraFade\(\s*constant\.(FADE_IN|FADE_OUT)\s*,\s*constant\.(WAIT|NO_WAIT)\s*,\s*([0-9.]+)")
     RE_FOLLOW = re.compile(r"FollowWaypoint\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)")
+    RE_GOTO = re.compile(r"GoToArea\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
+    RE_KILL = re.compile(r"\bKill\(\s*([\w.]+)\s*\)")
+    GOTO_SPEED = 10.0
 
     def __init__(self, name, text, resolve):
         self.name = name
         self.events = []   # (time, kind, data)
         self.fades = []    # (time, direction, duration)
-        self.follows = []  # (time, unit_obj, wp_obj, speed)
+        self.follows = []  # (time, unit_obj, "wp"|"area", wp_obj_or_xz, speed)
+        self.kills = []    # (time, obj)
+        self.camera_first_time = {}  # camera obj -> earliest time it becomes active
         clock = 0.0
         has_camera_op = False
         for line in text.splitlines():
@@ -195,12 +200,15 @@ class CutsceneTimeline(object):
                 obj = resolve(m.group(1))
                 if obj is not None:
                     self.events.append((clock, "camera", obj))
+                    self.camera_first_time.setdefault(obj, clock)
                     has_camera_op = True
             m = self.RE_SETWP.search(line)
             if m is not None:
                 cam, wp = resolve(m.group(1)), resolve(m.group(2))
                 if wp is not None:
                     self.events.append((clock, "waypoint", (cam, wp)))
+                    if cam is not None:
+                        self.camera_first_time.setdefault(cam, clock)
                     has_camera_op = True
             m = self.RE_SETTARGET.search(line)
             if m is not None:
@@ -209,6 +217,11 @@ class CutsceneTimeline(object):
             m = self.RE_SETFOV.search(line)
             if m is not None:
                 self.events.append((clock, "fov", float(m.group(2))))
+                cam = resolve(m.group(1))
+                if cam is not None:
+                    # e.g. the level's FIRSTCAM opens a cutscene without any
+                    # SetCamera call - the FOV line is its only reference.
+                    self.camera_first_time.setdefault(cam, clock)
             m = self.RE_FADE.search(line)
             if m is not None:
                 direction, wait, dur = m.group(1), m.group(2), float(m.group(3))
@@ -219,7 +232,18 @@ class CutsceneTimeline(object):
             if m is not None:
                 unit, wp = resolve(m.group(1)), resolve(m.group(2))
                 if unit is not None and wp is not None:
-                    self.follows.append((clock, unit, wp, float(m.group(4))))
+                    self.follows.append((clock, unit, "wp", wp, float(m.group(4))))
+            m = self.RE_GOTO.search(line)
+            if m is not None:
+                unit = resolve(m.group(1))
+                if unit is not None:
+                    dest = (float(m.group(2)), float(m.group(3)))
+                    self.follows.append((clock, unit, "area", dest, self.GOTO_SPEED))
+            m = self.RE_KILL.search(line)
+            if m is not None:
+                obj = resolve(m.group(1))
+                if obj is not None:
+                    self.kills.append((clock, obj))
             m = self.RE_WAIT.search(line)
             if m is not None:
                 clock += float(m.group(1))
@@ -231,6 +255,11 @@ class CutsceneTimeline(object):
         self.shots = shot_times if shot_times else [0.0]
 
     def state_at(self, t):
+        # Before the first SetCamera, the earliest camera the script references
+        # (usually the level's FIRSTCAM) is the one on screen.
+        first_cam = None
+        if self.camera_first_time:
+            first_cam = min(self.camera_first_time, key=self.camera_first_time.get)
         cam = wp = target = None
         fov = None
         wp_set_time = target_set_time = 0.0
@@ -239,9 +268,9 @@ class CutsceneTimeline(object):
                 break
             if kind == "camera":
                 if data is not cam:
-                    # A cut to a different camera drops the previous rail/target;
-                    # the new camera falls back to its own mCurrentWP/mTarget pose.
-                    wp = target = None
+                    # A cut to a different camera drops the previous rail/target/
+                    # FOV; the new camera falls back to its own XML state.
+                    wp = target = fov = None
                 cam = data
             elif kind == "waypoint":
                 if data[0] is not None:
@@ -253,6 +282,8 @@ class CutsceneTimeline(object):
                 target_set_time = time
             elif kind == "fov":
                 fov = data
+        if cam is None:
+            cam = first_cam
         return cam, wp, t - wp_set_time, target, t - target_set_time, fov
 
     def fade_at(self, t):
@@ -346,9 +377,12 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         handler = lv.bwmodelhandler
         maxdist_sq = DRAW_DISTANCE ** 2
         overrides = self.owner.unit_overrides()
+        killed = self.owner.killed_units()
         for objid, obj in self.editor.level_file.objects_with_positions.items():
             modelname = obj._modelname
             if modelname is None or modelname not in handler.models:
+                continue
+            if objid in killed:
                 continue
             mtx = obj.getmatrix()
             if mtx is None:
@@ -482,6 +516,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._chain = None
         self._target_chain = None
         self._active_cutscene = None
+        self._unit_routes = {}
         self._parse_retries = 3
         self.stop_play()
         self._cutscenes = []
@@ -556,6 +591,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._chain = None
         self._target_chain = None
         self._active_cutscene = None
+        self._unit_routes = {}
         self._t = 0.0
         wp = getattr(obj, "mCurrentWP", None)
         if wp is not None:
@@ -571,10 +607,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
     def choose_cutscene(self, index):
         self.stop_play()
         self._t = 0.0
+        self._unit_routes = {}
         if index <= 0:
             self._active_cutscene = None
         elif index - 1 < len(self._cutscenes):
             self._active_cutscene = self._cutscenes[index - 1]
+            self.build_unit_routes()
         self.update_header()
         self.glview.update()
 
@@ -677,6 +715,19 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self.stop_play()
             return
         self.check_level()
+        start_time = 0.0
+        if self._active_cutscene is None and self._camera is not None:
+            # Playing a camera that a cutscene script uses runs that cutscene
+            # from this camera's first shot, so scripted units move as well.
+            for cutscene in self._cutscenes:
+                if self._camera in cutscene.camera_first_time:
+                    self._active_cutscene = cutscene
+                    start_time = cutscene.camera_first_time[self._camera]
+                    index = self._cutscenes.index(cutscene) + 1
+                    self.cutscene_box.blockSignals(True)
+                    self.cutscene_box.setCurrentIndex(index)
+                    self.cutscene_box.blockSignals(False)
+                    break
         if self._active_cutscene is not None:
             self._duration = self._active_cutscene.duration
             self.build_unit_routes()
@@ -691,7 +742,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         else:
             self.header.setText("Select a cCamera (or pick a cutscene) first")
             return
-        self._t = 0.0
+        self._t = start_time
         self._playing = True
         self.button_play.setText("Stop")
         self.timer.start()
@@ -700,18 +751,17 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._playing = False
         self.timer.stop()
         self.button_play.setText("Play")
-        self._unit_routes = {}
         if self.editor.level_view is not None:
             self.editor.level_view.do_redraw()
 
     def build_unit_routes(self):
-        """Turn the cutscene's FollowWaypoint calls into per-unit movement routes.
-        A later FollowWaypoint for the same unit starts where the previous route
-        put the unit at that moment."""
+        """Turn the cutscene's movement calls (FollowWaypoint, GoToArea) into
+        per-unit routes. A later order for the same unit starts where the
+        previous route put the unit at that moment."""
         self._unit_routes = {}
-        for time, unit, wp, speed in self._active_cutscene.follows:
+        bwterrain = self.editor.level_view.bwterrain
+        for time, unit, kind, data, speed in self._active_cutscene.follows:
             objid = unit.id
-            chain = WaypointChain(wp)
             routes = self._unit_routes.setdefault(objid, [])
             if routes:
                 start_pos, _ = routes[-1].sample(time)
@@ -719,7 +769,19 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 start_pos = _obj_pos(unit)
             if start_pos is None:
                 continue
-            routes.append(UnitRoute(time, start_pos, chain, speed))
+            if kind == "wp":
+                points = [node[0] for node in WaypointChain(data).nodes]
+            else:
+                x, z = data
+                y = start_pos[1]
+                if bwterrain is not None and unit.type != "cAirVehicle":
+                    terrain_y = bwterrain.check_height(x, z)
+                    if terrain_y is not None:
+                        y = terrain_y
+                points = [(x, y, z)]
+            if not points:
+                continue
+            routes.append(UnitRoute(time, start_pos, points, speed))
 
     def unit_overrides(self):
         """objid -> (pos, direction) for scripted units at the current time."""
@@ -734,6 +796,13 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             if active is not None:
                 overrides[objid] = active.sample(self._t)
         return overrides
+
+    def killed_units(self):
+        """Object ids the script has removed (Kill) by the current time."""
+        if self._active_cutscene is None:
+            return set()
+        return set(obj.id for time, obj in self._active_cutscene.kills
+                   if time <= self._t)
 
     def tick(self):
         self._t += self.timer.interval() / 1000.0
