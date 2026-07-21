@@ -79,6 +79,10 @@ class PikminSideWidget(QWidget):
         self.verticalLayout.addWidget(self.button_set_level)
         self.verticalLayout.addStretch()
 
+        from widgets.camera_preview import CameraPreviewWidget
+        self.camera_preview = CameraPreviewWidget(self, parent)
+        self.verticalLayout.addWidget(self.camera_preview)
+
         self.name_label = QLabel(parent)
         self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.name_label.setFont(font)
