@@ -273,9 +273,9 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         super().__init__(parent)
         self.editor = editor
         self.owner = parent
-        self.setMinimumHeight(210)
+        self.setMinimumHeight(160)
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
-                           QtWidgets.QSizePolicy.Policy.Fixed)
+                           QtWidgets.QSizePolicy.Policy.Expanding)
         self._error_shown = False
 
     def paintGL(self):
@@ -439,7 +439,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         layout.addWidget(self.header)
 
         self.glview = CameraPreviewGL(self, editor)
-        layout.addWidget(self.glview)
+        layout.addWidget(self.glview, 1)
 
         controls = QtWidgets.QHBoxLayout()
         controls.setSpacing(2)

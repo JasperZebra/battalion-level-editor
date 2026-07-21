@@ -81,7 +81,7 @@ class PikminSideWidget(QWidget):
 
         from widgets.camera_preview import CameraPreviewWidget
         self.camera_preview = CameraPreviewWidget(self, parent)
-        self.verticalLayout.addWidget(self.camera_preview)
+        self.verticalLayout.addWidget(self.camera_preview, 1)
 
         self.name_label = QLabel(parent)
         self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -116,7 +116,7 @@ class PikminSideWidget(QWidget):
         self.scroll_layout.addWidget(self.comment_label)
         self.scroll_layout.addStretch()
         self.scroll_area.setWidget(self.scroll_area_content)
-        self.verticalLayout.addWidget(self.scroll_area)
+        self.verticalLayout.addWidget(self.scroll_area, 1)
         #self.verticalLayout.addStretch(500)
 
         self.objectlist = []
