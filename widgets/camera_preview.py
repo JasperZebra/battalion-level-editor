@@ -38,6 +38,7 @@ FAR_PLANE = 4000.0
 DRAW_DISTANCE = 3000.0
 CHAIN_LIMIT = 64
 TAIL_TIME = 2.0
+STATIC_SHOT_TIME = 4.0
 
 
 def _obj_pos(obj):
@@ -120,6 +121,57 @@ class WaypointChain(object):
         return self.nodes[-1][0]
 
 
+class UnitRoute(object):
+    """A scripted unit movement (FollowWaypoint): walk a polyline at a speed."""
+    def __init__(self, start_time, start_pos, chain, speed):
+        self.start_time = start_time
+        self.speed = speed if speed > 0.01 else 5.0
+        self.points = [start_pos] + [node[0] for node in chain.nodes]
+        self.lengths = []
+        total = 0.0
+        for i in range(len(self.points) - 1):
+            seg = math.dist(self.points[i], self.points[i + 1])
+            self.lengths.append(seg)
+            total += seg
+        self.total = total
+
+    def sample(self, t):
+        """(pos, horizontal direction) at time t."""
+        dist = max(t - self.start_time, 0.0) * self.speed
+        if dist >= self.total or not self.lengths:
+            p = self.points[-1]
+            a, b = self.points[-2] if len(self.points) > 1 else p, p
+        else:
+            walked = 0.0
+            a = b = self.points[0]
+            for i, seg in enumerate(self.lengths):
+                if dist <= walked + seg:
+                    a, b = self.points[i], self.points[i + 1]
+                    f = (dist - walked) / seg if seg > 0 else 0.0
+                    p = (a[0] + (b[0] - a[0]) * f,
+                         a[1] + (b[1] - a[1]) * f,
+                         a[2] + (b[2] - a[2]) * f)
+                    break
+                walked += seg
+        dx, dz = b[0] - a[0], b[2] - a[2]
+        length = math.hypot(dx, dz)
+        if length < 1e-5:
+            direction = (0.0, 1.0)
+        else:
+            direction = (dx / length, dz / length)
+        return p, direction
+
+
+def _facing_matrix(pos, direction):
+    """BW column-major matrix at pos, model +Z facing the travel direction."""
+    import numpy
+    dx, dz = direction
+    return numpy.array([dz, 0.0, -dx, 0.0,
+                        0.0, 1.0, 0.0, 0.0,
+                        dx, 0.0, dz, 0.0,
+                        pos[0], pos[1], pos[2], 1.0], dtype=numpy.float32)
+
+
 class CutsceneTimeline(object):
     """One Lua script's camera timeline: timed events + derived shot list."""
     RE_WAIT = re.compile(r"WaitFor\(\s*([0-9.]+)\s*\)")
@@ -128,11 +180,13 @@ class CutsceneTimeline(object):
     RE_SETTARGET = re.compile(r"CameraSetTarget\(\s*([\w.]+)\s*,\s*([\w.]+)\s*\)")
     RE_SETFOV = re.compile(r"CameraSetFOV\(\s*([\w.]+)\s*,\s*([0-9.]+)")
     RE_FADE = re.compile(r"CameraFade\(\s*constant\.(FADE_IN|FADE_OUT)\s*,\s*constant\.(WAIT|NO_WAIT)\s*,\s*([0-9.]+)")
+    RE_FOLLOW = re.compile(r"FollowWaypoint\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)")
 
     def __init__(self, name, text, resolve):
         self.name = name
         self.events = []   # (time, kind, data)
         self.fades = []    # (time, direction, duration)
+        self.follows = []  # (time, unit_obj, wp_obj, speed)
         clock = 0.0
         has_camera_op = False
         for line in text.splitlines():
@@ -161,6 +215,11 @@ class CutsceneTimeline(object):
                 self.fades.append((clock, direction, dur))
                 if wait == "WAIT":
                     clock += dur
+            m = self.RE_FOLLOW.search(line)
+            if m is not None:
+                unit, wp = resolve(m.group(1)), resolve(m.group(2))
+                if unit is not None and wp is not None:
+                    self.follows.append((clock, unit, wp, float(m.group(4))))
             m = self.RE_WAIT.search(line)
             if m is not None:
                 clock += float(m.group(1))
@@ -286,6 +345,7 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         glColor4f(1.0, 1.0, 1.0, 1.0)
         handler = lv.bwmodelhandler
         maxdist_sq = DRAW_DISTANCE ** 2
+        overrides = self.owner.unit_overrides()
         for objid, obj in self.editor.level_file.objects_with_positions.items():
             modelname = obj._modelname
             if modelname is None or modelname not in handler.models:
@@ -293,14 +353,19 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             mtx = obj.getmatrix()
             if mtx is None:
                 continue
-            dx = mtx.mtx[12] - campos[0]
-            dz = mtx.mtx[14] - campos[2]
-            if dx * dx + dz * dz > maxdist_sq:
-                continue
-            currmtx = mtx.mtx.copy()
-            height = getattr(obj, "height", None)
-            if height is not None:
-                currmtx[13] = height
+            override = overrides.get(objid)
+            if override is not None:
+                pos, direction = override
+                currmtx = _facing_matrix(pos, direction)
+            else:
+                dx = mtx.mtx[12] - campos[0]
+                dz = mtx.mtx[14] - campos[2]
+                if dx * dx + dz * dz > maxdist_sq:
+                    continue
+                currmtx = mtx.mtx.copy()
+                height = getattr(obj, "height", None)
+                if height is not None:
+                    currmtx[13] = height
             if obj.type == "cTroop":
                 BWMatrix.static_rotate_y(currmtx, math.pi)
             handler.rendermodel(modelname, currmtx, None, 0)
@@ -358,6 +423,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._t = 0.0
         self._playing = False
         self._duration = 0.0
+        self._unit_routes = {}         # objid -> [UnitRoute] sorted by start time
+        self._parse_retries = 0
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 4)
@@ -415,17 +482,21 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._chain = None
         self._target_chain = None
         self._active_cutscene = None
+        self._parse_retries = 3
         self.stop_play()
         self._cutscenes = []
         if level is not None:
             self._cutscenes = self.parse_cutscenes()
+        self.populate_cutscene_box()
+        self.update_header()
+
+    def populate_cutscene_box(self):
         self.cutscene_box.blockSignals(True)
         self.cutscene_box.clear()
         self.cutscene_box.addItem("Selected Camera")
         for cutscene in self._cutscenes:
             self.cutscene_box.addItem("Cutscene: " + cutscene.name)
         self.cutscene_box.blockSignals(False)
-        self.update_header()
 
     def parse_cutscenes(self):
         workbench = getattr(self.editor, "lua_workbench", None)
@@ -464,6 +535,13 @@ class CameraPreviewWidget(QtWidgets.QWidget):
 
     def on_select_update(self):
         self.check_level()
+        # The Lua workbench may finish decompiling after the level-change check;
+        # retry the cutscene scan a few times until scripts appear.
+        if not self._cutscenes and self._parse_retries > 0 and self.editor.level_file is not None:
+            self._parse_retries -= 1
+            self._cutscenes = self.parse_cutscenes()
+            if self._cutscenes:
+                self.populate_cutscene_box()
         # Sticky rule: only an actual cCamera selection retargets the preview.
         for obj in self.editor.level_view.selected:
             if obj.type == "cCamera":
@@ -598,13 +676,20 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         if self._playing:
             self.stop_play()
             return
+        self.check_level()
         if self._active_cutscene is not None:
             self._duration = self._active_cutscene.duration
-        elif self._camera is not None and self._chain is not None and self._chain.nodes:
-            self._duration = self._chain.duration + TAIL_TIME
-            if self._chain.cycle_start is not None:
-                self._duration = float("inf")
+            self.build_unit_routes()
+        elif self._camera is not None:
+            if self._chain is not None and self._chain.nodes:
+                self._duration = self._chain.duration + TAIL_TIME
+                if self._chain.cycle_start is not None:
+                    self._duration = float("inf")
+            else:
+                # Static camera: still play so the transport visibly works.
+                self._duration = STATIC_SHOT_TIME
         else:
+            self.header.setText("Select a cCamera (or pick a cutscene) first")
             return
         self._t = 0.0
         self._playing = True
@@ -615,6 +700,40 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._playing = False
         self.timer.stop()
         self.button_play.setText("Play")
+        self._unit_routes = {}
+        if self.editor.level_view is not None:
+            self.editor.level_view.do_redraw()
+
+    def build_unit_routes(self):
+        """Turn the cutscene's FollowWaypoint calls into per-unit movement routes.
+        A later FollowWaypoint for the same unit starts where the previous route
+        put the unit at that moment."""
+        self._unit_routes = {}
+        for time, unit, wp, speed in self._active_cutscene.follows:
+            objid = unit.id
+            chain = WaypointChain(wp)
+            routes = self._unit_routes.setdefault(objid, [])
+            if routes:
+                start_pos, _ = routes[-1].sample(time)
+            else:
+                start_pos = _obj_pos(unit)
+            if start_pos is None:
+                continue
+            routes.append(UnitRoute(time, start_pos, chain, speed))
+
+    def unit_overrides(self):
+        """objid -> (pos, direction) for scripted units at the current time."""
+        if self._active_cutscene is None or not self._unit_routes:
+            return {}
+        overrides = {}
+        for objid, routes in self._unit_routes.items():
+            active = None
+            for route in routes:
+                if route.start_time <= self._t:
+                    active = route
+            if active is not None:
+                overrides[objid] = active.sample(self._t)
+        return overrides
 
     def tick(self):
         self._t += self.timer.interval() / 1000.0
@@ -622,6 +741,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self.stop_play()
         self.update_header()
         self.glview.update()
+        # Keep the main viewport's spline overlay marker moving too.
+        self.editor.level_view.do_redraw()
 
     def navigate(self, delta):
         self.check_level()
@@ -645,6 +766,46 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self.set_camera(cameras[index % len(cameras)])
         self.update_header()
         self.glview.update()
+
+    # ------------------------------------------------------------------ overlay
+
+    def overlay_state(self):
+        """State for the main-viewport spline overlay (plugin_camera_preview_overlay):
+        {"poschain": [...], "aimchain": [...], "campos": ..., "lookat": ...,
+         "units": [(pos, dir), ...]} in BW world coords, or None when inactive."""
+        try:
+            if self.editor.level_file is None:
+                return None
+            if self._active_cutscene is not None:
+                cam, wp, wp_t, target, target_t, fov = self._active_cutscene.state_at(self._t)
+                if cam is None:
+                    return None
+                if wp is None:
+                    wp = getattr(cam, "mCurrentWP", None)
+                if target is None:
+                    target = getattr(cam, "mTarget", None)
+                chain = WaypointChain(wp) if wp is not None else None
+                target_chain = None
+                if target is not None and target.type == "cWaypoint":
+                    target_chain = WaypointChain(target)
+                pose = self.cutscene_pose()
+            elif self._camera is not None and not self._camera.deleted:
+                pose = self.camera_pose()
+                chain, target_chain = self._chain, self._target_chain
+            else:
+                return None
+            if pose is None:
+                return None
+            pos, lookat, fov, fade = pose
+            return {
+                "poschain": [node[0] for node in chain.nodes] if chain is not None else [],
+                "aimchain": [node[0] for node in target_chain.nodes] if target_chain is not None else [],
+                "campos": pos,
+                "lookat": lookat,
+                "units": list(self.unit_overrides().values()),
+            }
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------ ui
 
