@@ -1045,6 +1045,72 @@ class BattalionObject(object):
         else:
             return extradetail
 
+    def _link_ring(self):
+        """All members of this destroyable's NextLinkObject chain/ring (walls,
+        fences, bridges), walked forward and backward. See
+        decomp/linking_height_analysis.md."""
+        members = [self]
+        seen = {id(self)}
+        node = getattr(self, "NextLinkObject", None)
+        while node is not None and id(node) not in seen and len(members) < 64:
+            members.append(node)
+            seen.add(id(node))
+            node = getattr(node, "NextLinkObject", None)
+        # Backward: whoever links TO the front of our list.
+        front = self
+        for _ in range(64):
+            prev = None
+            for ref in getattr(front, "_referenced_by", ()):
+                if getattr(ref, "NextLinkObject", None) is front and id(ref) not in seen:
+                    prev = ref
+                    break
+            if prev is None:
+                break
+            members.insert(0, prev)
+            seen.add(id(prev))
+            front = prev
+        return members
+
+    def _chain_display_height(self, bwterrain, waterheight):
+        """Display Y for a linked section: the game resolves a chain from one
+        grounded anchor, every other section inheriting the neighbor's Y plus
+        LinkOffset.y (decomp/linking_height_analysis.md rule 3)."""
+        members = self._link_ring()
+        best = None
+        for m in members:
+            mtx = m.getmatrix()
+            if mtx is None:
+                continue
+            authored = mtx.mtx[13]
+            if 999.99 < authored < 1000.01:  # in-game sentinel -> 0
+                authored = 0.0
+            probe = bwterrain.check_height(mtx.mtx[12], mtx.mtx[14])
+            if probe is not None and probe >= 0 and getattr(m, "mStickToFloor", False):
+                grounded = probe + authored
+            elif probe is not None and probe >= 0 and authored < probe:
+                grounded = probe
+            else:
+                grounded = authored
+            if best is None or grounded > best[0]:
+                best = (grounded, m)
+        if best is None:
+            return None
+        anchor_y, anchor = best
+        # Accumulate LinkOffset.y from the anchor to us along the forward walk.
+        y = anchor_y
+        node = anchor
+        for _ in range(64):
+            if node is self:
+                return y
+            nxt = getattr(node, "NextLinkObject", None)
+            if nxt is None or nxt is anchor:
+                break
+            offset = getattr(nxt, "LinkOffset", None)
+            if offset is not None:
+                y += offset.y
+            node = nxt
+        return anchor_y  # not forward-reachable (we're behind the anchor): flat deck
+
     def calculate_height(self, bwterrain, waterheight):
         currbwmtx = self.getmatrix()
         if currbwmtx is None:
@@ -1058,6 +1124,16 @@ class BattalionObject(object):
         # stored at y=0 and rendered under the terrain; clamp them like the rest.
         #elif self.type == "cObjectiveMarker":
         #    if self.
+
+        # Linked walls/fences/bridges resolve their height through the chain,
+        # not through their own grounding - this keeps bridge decks continuous.
+        if self.type == "cDestroyableObject" and bwterrain is not None:
+            if getattr(self, "NextLinkObject", None) is not None or any(
+                    getattr(ref, "NextLinkObject", None) is self
+                    for ref in getattr(self, "_referenced_by", ())):
+                chain_y = self._chain_display_height(bwterrain, waterheight)
+                if chain_y is not None:
+                    return chain_y
 
         originalh = h
         locktosurface = False
