@@ -401,29 +401,53 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         # per-frame Python GL overhead was ~40ms/frame without this.
         dynamic_ids = set(self.owner._unit_routes)
         static_key = (id(self.editor.level_file), frozenset(dynamic_ids))
-        if self._static_key != static_key:
+        if self._static_key == static_key and self._static_list is not None:
+            glCallList(self._static_list)
+        elif getattr(self, "_static_warm", None) != static_key:
+            # First frame after a change: draw statics directly so lazily-built
+            # model display lists get created now - creating them nested inside
+            # our own list compile is a GL error (black preview).
+            self._draw_statics(handler, dynamic_ids, compile_list=False)
+            self._static_warm = static_key
+        else:
             if self._static_list is not None:
                 glDeleteLists(self._static_list, 1)
-            self._static_list = glGenLists(1)
-            glNewList(self._static_list, GL_COMPILE)
-            for objid, obj in self.editor.level_file.objects_with_positions.items():
-                modelname = obj._modelname
-                if (modelname is None or modelname not in handler.models
-                        or obj.type == "cTroop" or objid in dynamic_ids):
-                    continue
-                mtx = obj.getmatrix()
-                if mtx is None:
-                    continue
-                currmtx = mtx.mtx.copy()
-                height = getattr(obj, "height", None)
-                if height is not None:
-                    currmtx[13] = height
-                handler.rendermodel(modelname, currmtx, None, 0)
-            glEndList()
-            self._static_key = static_key
-        glCallList(self._static_list)
+                self._static_list = None
+            try:
+                self._static_list = glGenLists(1)
+                glNewList(self._static_list, GL_COMPILE)
+                try:
+                    self._draw_statics(handler, dynamic_ids, compile_list=True)
+                finally:
+                    glEndList()
+                self._static_key = static_key
+                glCallList(self._static_list)
+            except Exception:
+                traceback.print_exc()
+                self._static_list = None
+                self._static_key = None
+                self._draw_statics(handler, dynamic_ids, compile_list=False)
 
         # Troops + script-moved units render per frame (poses/positions change).
+        self._render_dynamic(lv, campos, handler, overrides, killed, dynamic_ids)
+        glDisable(GL_TEXTURE_2D)
+
+    def _draw_statics(self, handler, dynamic_ids, compile_list):
+        for objid, obj in self.editor.level_file.objects_with_positions.items():
+            modelname = obj._modelname
+            if (modelname is None or modelname not in handler.models
+                    or obj.type == "cTroop" or objid in dynamic_ids):
+                continue
+            mtx = obj.getmatrix()
+            if mtx is None:
+                continue
+            currmtx = mtx.mtx.copy()
+            height = getattr(obj, "height", None)
+            if height is not None:
+                currmtx[13] = height
+            handler.rendermodel(modelname, currmtx, None, 0)
+
+    def _render_dynamic(self, lv, campos, handler, overrides, killed, dynamic_ids):
         maxdist_sq = DRAW_DISTANCE ** 2
         for objid, obj in self.editor.level_file.objects_with_positions.items():
             modelname = obj._modelname
