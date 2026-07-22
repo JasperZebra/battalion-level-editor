@@ -399,7 +399,8 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         # compiled once per level+route set into a single display list -
         # per-frame Python GL overhead was ~40ms/frame without this.
         dynamic_ids = set(self.owner._unit_routes)
-        static_key = (id(self.editor.level_file), frozenset(dynamic_ids))
+        static_key = (id(self.editor.level_file), frozenset(dynamic_ids),
+                      self.owner._filter_gen)
         if self._static_key == static_key and self._static_list is not None:
             glCallList(self._static_list)
         elif getattr(self, "_static_warm", None) != static_key:
@@ -432,10 +433,14 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         glDisable(GL_TEXTURE_2D)
 
     def _draw_statics(self, handler, dynamic_ids, compile_list):
+        vismenu = getattr(self.editor.level_view, "visibility_menu", None)
         for objid, obj in self.editor.level_file.objects_with_positions.items():
             modelname = obj._modelname
             if (modelname is None or modelname not in handler.models
                     or objid in dynamic_ids):
+                continue
+            if vismenu is not None and not (vismenu.object_3d_visible(obj.type)
+                                            and vismenu.object_visible(obj.type, obj)):
                 continue
             mtx = obj.getmatrix()
             if mtx is None:
@@ -537,6 +542,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._parse_retries = 0
         self._overridden = set()       # objids with an active display override
         self._tick_count = 0
+        self._filter_gen = 0           # bumped on visibility-filter changes
+        self._filter_hooked = False
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 4)
@@ -585,8 +592,19 @@ class CameraPreviewWidget(QtWidgets.QWidget):
 
     # ------------------------------------------------------------------ state
 
+    def on_filter_update(self):
+        self._filter_gen += 1
+        self.glview.update()
+
     def check_level(self):
         """Detect level load/reset and rebuild cutscene list + camera state."""
+        # Mirror the main editor's visibility filters in the preview: the menu
+        # exists after startup wiring, so hook its signal lazily.
+        if not self._filter_hooked:
+            menu = getattr(self.editor.level_view, "visibility_menu", None)
+            if menu is not None:
+                menu.filter_update.connect(self.on_filter_update)
+                self._filter_hooked = True
         level = self.editor.level_file
         if level is self._level_ref:
             return
@@ -751,6 +769,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         if (abs(lookat[0] - pos[0]) < 1e-3 and abs(lookat[1] - pos[1]) < 1e-3
                 and abs(lookat[2] - pos[2]) < 1e-3):
             lookat = (pos[0], pos[1], pos[2] - 10.0)
+        # The game's cameras never clip through the ground: ride above terrain.
+        bwterrain = getattr(self.editor.level_view, "bwterrain", None)
+        if bwterrain is not None:
+            ground = bwterrain.check_height(pos[0], pos[2])
+            if ground is not None and pos[1] < ground + 2.0:
+                pos = (pos[0], ground + 2.0, pos[2])
         return pos, lookat, fov, 0.0
 
     def camera_pose(self):
