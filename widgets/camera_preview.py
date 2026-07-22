@@ -951,10 +951,10 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         display-only mtxoverride (same mechanism as Dolphin live view) - the
         objects' real edit data is never modified."""
         # Main-view unit movement is disabled (performance): cutscene motion
-        # renders in the preview only. The main viewport just refreshes the
-        # camera marker on the spline overlay at a low rate.
+        # renders in the preview only. The main viewport repaints (no scene
+        # rebuild - cheap) at 30Hz so the camera marker glides along the spline.
         self._tick_count += 1
-        if self._tick_count % 6 == 0:
+        if self._tick_count % 2 == 0:
             self.editor.level_view.do_redraw()
 
     def clear_main_view_overrides(self):
