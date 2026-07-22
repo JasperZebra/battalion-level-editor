@@ -10,6 +10,7 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 
 from lib.bw_types import BWMatrix
+from widgets.camera_preview_anim import AnimationRenderer
 
 
 # Camera POV preview for cutscene cameras (cCamera), shown in the Main side tab.
@@ -415,6 +416,13 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
                     currmtx[13] = height
             if obj.type == "cTroop":
                 BWMatrix.static_rotate_y(currmtx, math.pi)
+            if override is not None and obj.type == "cTroop":
+                # Moving troops play their walk clip; fall back to static pose.
+                arc = getattr(self.editor.file_menu, "resource_archive", None)
+                if self.owner.anim_renderer.render_animated(
+                        arc, handler.textures, obj, modelname, currmtx,
+                        self.owner._t, self.editor.level_file.is_bw1()):
+                    continue
             handler.rendermodel(modelname, currmtx, None, 0)
         glDisable(GL_TEXTURE_2D)
 
@@ -474,6 +482,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._all_timelines = []       # every level script, for background movement
         self._merged_kills = []
         self._parse_retries = 0
+        self.anim_renderer = AnimationRenderer()
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 4)
@@ -534,6 +543,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._unit_routes = {}
         self._all_timelines = []
         self._merged_kills = []
+        self.anim_renderer.clear()
         self._parse_retries = 3
         self.stop_play()
         self._cutscenes = []
