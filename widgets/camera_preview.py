@@ -577,7 +577,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self.cutscene_box.activated.connect(self.choose_cutscene)
 
         self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(33)
+        self.timer.setInterval(16)  # 60fps playback
+        self.timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
         self.timer.timeout.connect(self.tick)
 
         editor.level_view.select_update.connect(self.on_select_update)
@@ -929,10 +930,11 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._t += self.timer.interval() / 1000.0
         if self._t >= self._duration:
             self.stop_play()
-        self.update_header()
-        # The preview re-renders the whole scene per frame (immediate mode);
-        # 15fps keeps playback smooth enough without starving the editor.
-        if self._tick_count % 2 == 0 and self.isVisible():
+        if self._tick_count % 6 == 0:  # label relayout at 10Hz is plenty
+            self.update_header()
+        # The static-scene display list brought preview paints to ~4ms, so the
+        # preview runs at the full 60fps tick rate now.
+        if self.isVisible():
             self.glview.update()
         override_start = time.perf_counter()
         self.apply_main_view_overrides()
@@ -962,8 +964,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     self._overridden.add(objid)
                     moved.append(obj)
         # A full forced rebuild recomputes the whole scene and lags the editor;
-        # re-instance ONLY the moving units' models (forcespecific), at 5Hz.
-        if self._tick_count % 6 == 0:
+        # re-instance ONLY the moving units' models (forcespecific), at 30Hz.
+        if self._tick_count % 2 == 0:
             if moved:
                 lv.do_redraw(forcespecific=moved)
             else:
