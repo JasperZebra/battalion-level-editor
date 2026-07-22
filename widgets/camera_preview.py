@@ -946,6 +946,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         level = self.editor.level_file
         overrides = self.unit_overrides()
         self._tick_count += 1
+        moved = []
         if overrides and level is not None:
             lv.cutscene_anim_override = True
             for objid, (pos, direction) in overrides.items():
@@ -953,11 +954,14 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 if obj is not None:
                     obj.set_mtx_override(_facing_matrix(pos, direction))
                     self._overridden.add(objid)
-        # Rebuilding/redrawing the main view every 33ms tick lags the editor
-        # badly; refresh it at ~10Hz like Dolphin live view (preview keeps
-        # its own full rate).
-        if self._tick_count % 3 == 0:
-            lv.do_redraw(force=bool(overrides))
+                    moved.append(obj)
+        # A full forced rebuild recomputes the whole scene and lags the editor;
+        # re-instance ONLY the moving units' models (forcespecific), at 5Hz.
+        if self._tick_count % 6 == 0:
+            if moved:
+                lv.do_redraw(forcespecific=moved)
+            else:
+                lv.do_redraw()
 
     def clear_main_view_overrides(self):
         lv = self.editor.level_view
