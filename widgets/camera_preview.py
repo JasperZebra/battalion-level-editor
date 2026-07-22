@@ -185,16 +185,29 @@ class CutsceneTimeline(object):
     RE_KILL = re.compile(r"\bKill\(\s*([\w.]+)\s*\)")
     GOTO_SPEED = 10.0
 
+    RE_BLOCK_OPEN = re.compile(r"\b(?:if\b.*\bthen|while\b.*\bdo|for\b.*\bdo|function\b)")
+    RE_BLOCK_CLOSE = re.compile(r"^\s*end\b")
+
     def __init__(self, name, text, resolve):
         self.name = name
         self.events = []   # (time, kind, data)
         self.fades = []    # (time, direction, duration)
-        self.follows = []  # (time, unit_obj, "wp"|"area", wp_obj_or_xz, speed)
-        self.kills = []    # (time, obj)
+        self.follows = []  # (time, unit_obj, "wp"|"area", wp_obj_or_xz, speed, conditional)
+        self.kills = []    # (time, obj, conditional)
         self.camera_first_time = {}  # camera obj -> earliest time it becomes active
         clock = 0.0
         has_camera_op = False
+        # Track control-flow nesting: commands inside if/while/for blocks are
+        # gameplay-conditional; the game runs every script from level start, so
+        # only the linear top-of-function flow is safe to merge into another
+        # script's cutscene as background movement.
+        depth = 0
         for line in text.splitlines():
+            conditional = depth > 1  # depth 1 = the function body itself
+            if self.RE_BLOCK_CLOSE.search(line):
+                depth = max(depth - 1, 0)
+            if self.RE_BLOCK_OPEN.search(line):
+                depth += 1
             m = self.RE_SETCAM.search(line)
             if m is not None:
                 obj = resolve(m.group(1))
@@ -232,18 +245,18 @@ class CutsceneTimeline(object):
             if m is not None:
                 unit, wp = resolve(m.group(1)), resolve(m.group(2))
                 if unit is not None and wp is not None:
-                    self.follows.append((clock, unit, "wp", wp, float(m.group(4))))
+                    self.follows.append((clock, unit, "wp", wp, float(m.group(4)), conditional))
             m = self.RE_GOTO.search(line)
             if m is not None:
                 unit = resolve(m.group(1))
                 if unit is not None:
                     dest = (float(m.group(2)), float(m.group(3)))
-                    self.follows.append((clock, unit, "area", dest, self.GOTO_SPEED))
+                    self.follows.append((clock, unit, "area", dest, self.GOTO_SPEED, conditional))
             m = self.RE_KILL.search(line)
             if m is not None:
                 obj = resolve(m.group(1))
                 if obj is not None:
-                    self.kills.append((clock, obj))
+                    self.kills.append((clock, obj, conditional))
             m = self.RE_WAIT.search(line)
             if m is not None:
                 clock += float(m.group(1))
@@ -458,6 +471,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._playing = False
         self._duration = 0.0
         self._unit_routes = {}         # objid -> [UnitRoute] sorted by start time
+        self._all_timelines = []       # every level script, for background movement
+        self._merged_kills = []
         self._parse_retries = 0
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -517,6 +532,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._target_chain = None
         self._active_cutscene = None
         self._unit_routes = {}
+        self._all_timelines = []
+        self._merged_kills = []
         self._parse_retries = 3
         self.stop_play()
         self._cutscenes = []
@@ -550,6 +567,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             return name_to_obj.get(name)
 
         cutscenes = []
+        self._all_timelines = []
         try:
             paths = workbench.get_lua_script_paths()
         except Exception:
@@ -560,10 +578,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     text = f.read()
             except OSError:
                 continue
-            if "SetCamera" not in text and "CameraSetWaypoint" not in text:
-                continue
+            # Every script is parsed: non-camera scripts still contribute
+            # background unit movement to cutscene playback (the game runs
+            # all scripts concurrently from level start).
             timeline = CutsceneTimeline(
                 os.path.splitext(os.path.basename(path))[0], text, resolve)
+            self._all_timelines.append(timeline)
             if timeline.valid:
                 cutscenes.append(timeline)
         return cutscenes
@@ -754,13 +774,29 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         if self.editor.level_view is not None:
             self.editor.level_view.do_redraw()
 
+    def gather_movement(self):
+        """Movement/kill commands for the active cutscene: everything from its
+        own script, plus the unconditional top-level commands of every other
+        level script (all scripts start together at level load in-game)."""
+        follows = [entry[:5] for entry in self._active_cutscene.follows]
+        kills = [entry[:2] for entry in self._active_cutscene.kills]
+        for timeline in self._all_timelines:
+            if timeline is self._active_cutscene:
+                continue
+            follows.extend(entry[:5] for entry in timeline.follows if not entry[5])
+            kills.extend(entry[:2] for entry in timeline.kills if not entry[2])
+        follows.sort(key=lambda entry: entry[0])
+        kills.sort(key=lambda entry: entry[0])
+        return follows, kills
+
     def build_unit_routes(self):
-        """Turn the cutscene's movement calls (FollowWaypoint, GoToArea) into
+        """Turn the scripted movement calls (FollowWaypoint, GoToArea) into
         per-unit routes. A later order for the same unit starts where the
         previous route put the unit at that moment."""
         self._unit_routes = {}
+        follows, self._merged_kills = self.gather_movement()
         bwterrain = self.editor.level_view.bwterrain
-        for time, unit, kind, data, speed in self._active_cutscene.follows:
+        for time, unit, kind, data, speed in follows:
             objid = unit.id
             routes = self._unit_routes.setdefault(objid, [])
             if routes:
@@ -798,11 +834,10 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         return overrides
 
     def killed_units(self):
-        """Object ids the script has removed (Kill) by the current time."""
+        """Object ids the scripts have removed (Kill) by the current time."""
         if self._active_cutscene is None:
             return set()
-        return set(obj.id for time, obj in self._active_cutscene.kills
-                   if time <= self._t)
+        return set(obj.id for time, obj in self._merged_kills if time <= self._t)
 
     def tick(self):
         self._t += self.timer.interval() / 1000.0
