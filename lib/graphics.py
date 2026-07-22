@@ -295,7 +295,8 @@ class Graphics(object):
                     mtx, extradata = default_matrices, default_extradata
                     self.scene.set_not_empty("generic")
 
-                if rw.dolphin.do_visualize() and obj.mtxoverride is not None:
+                if (rw.dolphin.do_visualize() or getattr(rw, "cutscene_anim_override", False)) \
+                        and obj.mtxoverride is not None:
                     currmtx = obj.mtxoverride.copy()
                 else:
                     currmtx = obj.getmatrix().mtx.copy()

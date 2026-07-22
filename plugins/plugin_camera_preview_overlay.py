@@ -67,7 +67,6 @@ class Plugin(object):
         _chain_lines([state["campos"], state["lookat"]], 1.0, 0.2, 0.2, 1.5)  # aim line
         _markers([state["campos"]], 1.0, 0.4, 0.1, 11.0)              # camera position
         _markers([state["lookat"]], 1.0, 0.2, 0.2, 8.0)               # look-at point
-        _markers([pos for pos, direction in state["units"]], 1.0, 0.2, 1.0, 9.0)  # scripted units
 
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_CULL_FACE)

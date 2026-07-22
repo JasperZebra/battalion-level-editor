@@ -482,6 +482,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._all_timelines = []       # every level script, for background movement
         self._merged_kills = []
         self._parse_retries = 0
+        self._overridden = set()       # objids with an active display override
         self.anim_renderer = AnimationRenderer()
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -786,7 +787,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self.timer.stop()
         self.button_play.setText("Play")
         if self.editor.level_view is not None:
-            self.editor.level_view.do_redraw()
+            self.clear_main_view_overrides()
 
     def gather_movement(self):
         """Movement/kill commands for the active cutscene: everything from its
@@ -859,8 +860,35 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self.stop_play()
         self.update_header()
         self.glview.update()
-        # Keep the main viewport's spline overlay marker moving too.
-        self.editor.level_view.do_redraw()
+        self.apply_main_view_overrides()
+
+    def apply_main_view_overrides(self):
+        """Move the ACTUAL units in the main viewport during playback via the
+        display-only mtxoverride (same mechanism as Dolphin live view) - the
+        objects' real edit data is never modified."""
+        lv = self.editor.level_view
+        level = self.editor.level_file
+        overrides = self.unit_overrides()
+        if overrides and level is not None:
+            lv.cutscene_anim_override = True
+            for objid, (pos, direction) in overrides.items():
+                obj = level.objects.get(objid)
+                if obj is not None:
+                    obj.set_mtx_override(_facing_matrix(pos, direction))
+                    self._overridden.add(objid)
+        lv.do_redraw(force=True)
+
+    def clear_main_view_overrides(self):
+        lv = self.editor.level_view
+        level = self.editor.level_file
+        lv.cutscene_anim_override = False
+        if level is not None:
+            for objid in self._overridden:
+                obj = level.objects.get(objid)
+                if obj is not None:
+                    obj.set_mtx_override(None)
+        self._overridden = set()
+        lv.do_redraw(force=True)
 
     def navigate(self, delta):
         self.check_level()
@@ -920,7 +948,6 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 "aimchain": [node[0] for node in target_chain.nodes] if target_chain is not None else [],
                 "campos": pos,
                 "lookat": lookat,
-                "units": list(self.unit_overrides().values()),
             }
         except Exception:
             return None
