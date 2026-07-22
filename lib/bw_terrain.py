@@ -473,16 +473,9 @@ class BWTerrainV2(BWSectionedFile):
         timer.time("AABBs generated")
 
     def check_height(self, x, y):
-        mapx = int((x + 2048)*0.1875)
-        mapy = int((y + 2048)*0.1875)
-        if 0 <= mapx < 768 and 0 <= mapy < 768:
-            mapx = mapx + mapx // 3
-            mapy = mapy + mapy // 3
-            if self.pointdata[mapx, mapy] == -1:
-                return None
-            return self.pointdata[mapx, mapy]
-        else:
-            return None
+        # Bilinear like the game: single-point truncation was up to ~50-97
+        # units off on cliffs (see decomp/terrain_format_analysis.md).
+        return self.check_height_interpolate(x, y)
 
     def _check_height(self, x, y):
         mapx = x
@@ -516,7 +509,7 @@ class BWTerrainV2(BWSectionedFile):
             return p1_1
         else:
             p1_avg = p1_1*(1-x_fac) + p2_1*x_fac
-            p2_avg = p1_2 * (1 - y_fac) + p2_2 * y_fac
+            p2_avg = p1_2 * (1 - x_fac) + p2_2 * x_fac
 
             fin = p1_avg*(1-y_fac) + p2_avg*y_fac
             return fin
