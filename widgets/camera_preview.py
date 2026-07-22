@@ -325,7 +325,10 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
 
     def paintGL(self):
         try:
+            import time
+            start = time.perf_counter()
             self._paint()
+            self.owner.perf_note("preview_paint", time.perf_counter() - start)
         except Exception:
             if not self._error_shown:
                 self._error_shown = True
@@ -863,7 +866,16 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             return set()
         return set(obj.id for time, obj in self._merged_kills if time <= self._t)
 
+    def perf_note(self, name, seconds):
+        stats = getattr(self, "_perf", None)
+        if stats is None:
+            stats = self._perf = {}
+        total, count, worst = stats.get(name, (0.0, 0, 0.0))
+        stats[name] = (total + seconds, count + 1, max(worst, seconds))
+
     def tick(self):
+        import time
+        tick_start = time.perf_counter()
         self._t += self.timer.interval() / 1000.0
         if self._t >= self._duration:
             self.stop_play()
@@ -872,7 +884,15 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         # 15fps keeps playback smooth enough without starving the editor.
         if self._tick_count % 2 == 0 and self.isVisible():
             self.glview.update()
+        override_start = time.perf_counter()
         self.apply_main_view_overrides()
+        self.perf_note("overrides+redraw", time.perf_counter() - override_start)
+        self.perf_note("tick_total", time.perf_counter() - tick_start)
+        if self._tick_count % 90 == 0 and getattr(self, "_perf", None):
+            print("CS-PERF " + "  ".join(
+                "%s avg=%.1fms worst=%.1fms n=%d" % (k, v[0] / v[1] * 1000, v[2] * 1000, v[1])
+                for k, v in self._perf.items()))
+            self._perf = {}
 
     def apply_main_view_overrides(self):
         """Move the ACTUAL units in the main viewport during playback via the
