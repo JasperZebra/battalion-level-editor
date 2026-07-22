@@ -282,8 +282,11 @@ class CutsceneTimeline(object):
             if kind == "camera":
                 if data is not cam:
                     # A cut to a different camera drops the previous rail/target/
-                    # FOV; the new camera falls back to its own XML state.
+                    # FOV; the new camera falls back to its own XML state, and
+                    # its rail clock starts at the CUT, not at cutscene start -
+                    # otherwise fallback rails begin mid-flight or already done.
                     wp = target = fov = None
+                    wp_set_time = target_set_time = time
                 cam = data
             elif kind == "waypoint":
                 if data[0] is not None:
