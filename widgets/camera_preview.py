@@ -10,7 +10,6 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 
 from lib.bw_types import BWMatrix
-from widgets.camera_preview_anim import AnimationRenderer
 
 
 # Camera POV preview for cutscene cameras (cCamera), shown in the Main side tab.
@@ -436,7 +435,7 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         for objid, obj in self.editor.level_file.objects_with_positions.items():
             modelname = obj._modelname
             if (modelname is None or modelname not in handler.models
-                    or obj.type == "cTroop" or objid in dynamic_ids):
+                    or objid in dynamic_ids):
                 continue
             mtx = obj.getmatrix()
             if mtx is None:
@@ -445,6 +444,8 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             height = getattr(obj, "height", None)
             if height is not None:
                 currmtx[13] = height
+            if obj.type == "cTroop":
+                BWMatrix.static_rotate_y(currmtx, math.pi)
             handler.rendermodel(modelname, currmtx, None, 0)
 
     def _render_dynamic(self, lv, campos, handler, overrides, killed, dynamic_ids):
@@ -453,8 +454,8 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             modelname = obj._modelname
             if modelname is None or modelname not in handler.models:
                 continue
-            if obj.type != "cTroop" and objid not in dynamic_ids:
-                continue
+            if objid not in dynamic_ids:
+                continue  # everything else is in the compiled static scene
             if objid in killed:
                 continue
             mtx = obj.getmatrix()
@@ -475,14 +476,6 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
                     currmtx[13] = height
             if obj.type == "cTroop":
                 BWMatrix.static_rotate_y(currmtx, math.pi)
-            if override is not None or (self.owner._playing and obj.type == "cTroop"
-                                        and dx * dx + dz * dz < 360000):  # idle only near camera
-                arc = getattr(self.editor.file_menu, "resource_archive", None)
-                if self.owner.anim_renderer.render_animated(
-                        arc, handler.textures, obj, modelname, currmtx,
-                        self.owner._t, self.editor.level_file.is_bw1(),
-                        idle=override is None):
-                    continue
             handler.rendermodel(modelname, currmtx, None, 0)
         glDisable(GL_TEXTURE_2D)
 
@@ -544,7 +537,6 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._parse_retries = 0
         self._overridden = set()       # objids with an active display override
         self._tick_count = 0
-        self.anim_renderer = AnimationRenderer()
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 4)
@@ -605,7 +597,6 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._unit_routes = {}
         self._all_timelines = []
         self._merged_kills = []
-        self.anim_renderer.clear()
         self._parse_retries = 3
         self.stop_play()
         self._cutscenes = []
