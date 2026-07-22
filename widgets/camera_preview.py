@@ -182,7 +182,8 @@ class CutsceneTimeline(object):
     RE_FADE = re.compile(r"CameraFade\(\s*constant\.(FADE_IN|FADE_OUT)\s*,\s*constant\.(WAIT|NO_WAIT)\s*,\s*([0-9.]+)")
     RE_FOLLOW = re.compile(r"FollowWaypoint\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)")
     RE_FOLLOWUNIT = re.compile(r"FollowUnit\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,")
-    RE_PHONE = re.compile(r"PhoneMessage\(\s*(\d+)\s*,\s*[\w.]+\s*,\s*-?\d+\s*,\s*([0-9.]+)\s*,\s*([\w.]+)")
+    RE_PHONE = re.compile(r"PhoneMessage\(\s*(\d+)\s*,\s*[\w.]+\s*,\s*(-?\d+)\s*,\s*([0-9.]+)\s*,\s*([\w.]+)")
+    RE_CLEARQ = re.compile(r"ClearMessageQueue\(")
     RE_GOTO = re.compile(r"GoToArea\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
     RE_KILL = re.compile(r"\bKill\(\s*([\w.]+)\s*\)")
     GOTO_SPEED = 10.0
@@ -196,7 +197,8 @@ class CutsceneTimeline(object):
         self.fades = []    # (time, direction, duration)
         self.follows = []  # (time, unit_obj, "wp"|"area", wp_obj_or_xz, speed, conditional)
         self.kills = []    # (time, obj, conditional)
-        self.messages = []  # (time, msgid, duration) - PhoneMessage popups
+        self.messages = []  # (start, msgid, duration, sprite, army) - queued popups
+        self._msg_clears = []
         self.camera_first_time = {}  # camera obj -> earliest time it becomes active
         clock = 0.0
         has_camera_op = False
@@ -267,13 +269,32 @@ class CutsceneTimeline(object):
                     self.follows.append((clock, unit, "unit", tgt, 7.0, conditional))
             m = self.RE_PHONE.search(line)
             if m is not None:
-                dur = float(m.group(2))
-                sprite = resolve(m.group(3))
-                self.messages.append((clock, int(m.group(1)),
-                                      dur if dur > 0 else 5.0, sprite))
+                dur = float(m.group(3))
+                sprite = resolve(m.group(4))
+                self.messages.append((clock, int(m.group(1)), dur if dur > 0 else 5.0,
+                                      sprite, int(m.group(2))))
+            if self.RE_CLEARQ.search(line):
+                self._msg_clears.append(clock)
             m = self.RE_WAIT.search(line)
             if m is not None:
                 clock += float(m.group(1))
+        # Phone messages QUEUE in-game: stacked calls play back to back, each
+        # for its own duration; ClearMessageQueue drops not-yet-shown ones.
+        scheduled = []
+        queue_end = 0.0
+        items = sorted([("m",) + msg for msg in self.messages]
+                       + [("c", t) for t in self._msg_clears], key=lambda e: e[1])
+        for item in items:
+            if item[0] == "c":
+                t = item[1]
+                scheduled = [s for s in scheduled if s[0] <= t]
+                queue_end = max([t] + [s[0] + s[2] for s in scheduled if s[0] <= t])
+            else:
+                _, t, msgid, dur, sprite, army = item
+                start = max(t, queue_end)
+                scheduled.append((start, msgid, dur, sprite, army))
+                queue_end = start + dur
+        self.messages = scheduled
         self.valid = has_camera_op
         self.duration = clock + TAIL_TIME
         # A shot starts wherever the camera is cut or re-railed.
@@ -1148,7 +1169,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 self.msg_label.hide()
             else:
                 pixmap = self.compose_phone_box(self.message_text(active[1]),
-                                                self.sprite_texture_name(active[3]))
+                                                self.sprite_texture_name(active[3]),
+                                                active[4])
                 if pixmap is not None:
                     self.msg_label.setStyleSheet("background: transparent;")
                     self.msg_label.setPixmap(pixmap)
@@ -1165,7 +1187,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     self.msg_label.setGeometry(6, 4, max(self.glview.width() - 12, 50), 52)
                 self.msg_label.show()
 
-    def compose_phone_box(self, text, portrait_name):
+    def compose_phone_box(self, text, portrait_name, army=0):
         """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops:
         left cap (0,2,29x97), stretch middle (32,2,60x97), right portrait
         frame (63,2,128x146), portrait centered in the frame, text in the
@@ -1194,9 +1216,11 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             # Portrait center (555,89) => (404.5,51.5) relative to box origin.
             painter.drawPixmap(int(404.5 * scale - pw / 2), int(51.5 * scale - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
-        painter.setPen(QtGui.QColor(255, 255, 255))
+        # White for the player's army, yellow for the enemy (mEnemyTextColour).
+        painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
+                       else QtGui.QColor(255, 255, 0))
         font = QtGui.QFont()
-        font.setPointSizeF(max(9.0 * scale * 2.2, 6.0))
+        font.setPixelSize(max(int(11 * scale), 8))
         font.setBold(True)
         painter.setFont(font)
         # Game text rect (screen 183..492 x, 48..126 y) relative to box origin.
