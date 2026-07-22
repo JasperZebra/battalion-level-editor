@@ -322,6 +322,8 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
                            QtWidgets.QSizePolicy.Policy.Expanding)
         self._error_shown = False
+        self._static_list = None
+        self._static_key = None
 
     def paintGL(self):
         try:
@@ -392,12 +394,42 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         glDisable(GL_BLEND)
         glColor4f(1.0, 1.0, 1.0, 1.0)
         handler = lv.bwmodelhandler
-        maxdist_sq = DRAW_DISTANCE ** 2
         overrides = self.owner.unit_overrides()
         killed = self.owner.killed_units()
+        # Everything that never moves (non-troops without an override) is
+        # compiled once per level+route set into a single display list -
+        # per-frame Python GL overhead was ~40ms/frame without this.
+        dynamic_ids = set(self.owner._unit_routes)
+        static_key = (id(self.editor.level_file), frozenset(dynamic_ids))
+        if self._static_key != static_key:
+            if self._static_list is not None:
+                glDeleteLists(self._static_list, 1)
+            self._static_list = glGenLists(1)
+            glNewList(self._static_list, GL_COMPILE)
+            for objid, obj in self.editor.level_file.objects_with_positions.items():
+                modelname = obj._modelname
+                if (modelname is None or modelname not in handler.models
+                        or obj.type == "cTroop" or objid in dynamic_ids):
+                    continue
+                mtx = obj.getmatrix()
+                if mtx is None:
+                    continue
+                currmtx = mtx.mtx.copy()
+                height = getattr(obj, "height", None)
+                if height is not None:
+                    currmtx[13] = height
+                handler.rendermodel(modelname, currmtx, None, 0)
+            glEndList()
+            self._static_key = static_key
+        glCallList(self._static_list)
+
+        # Troops + script-moved units render per frame (poses/positions change).
+        maxdist_sq = DRAW_DISTANCE ** 2
         for objid, obj in self.editor.level_file.objects_with_positions.items():
             modelname = obj._modelname
             if modelname is None or modelname not in handler.models:
+                continue
+            if obj.type != "cTroop" and objid not in dynamic_ids:
                 continue
             if objid in killed:
                 continue
@@ -405,12 +437,12 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             if mtx is None:
                 continue
             override = overrides.get(objid)
+            dx = mtx.mtx[12] - campos[0]
+            dz = mtx.mtx[14] - campos[2]
             if override is not None:
                 pos, direction = override
                 currmtx = _facing_matrix(pos, direction)
             else:
-                dx = mtx.mtx[12] - campos[0]
-                dz = mtx.mtx[14] - campos[2]
                 if dx * dx + dz * dz > maxdist_sq:
                     continue
                 currmtx = mtx.mtx.copy()
@@ -421,9 +453,6 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
                 BWMatrix.static_rotate_y(currmtx, math.pi)
             if override is not None or (self.owner._playing and obj.type == "cTroop"
                                         and dx * dx + dz * dz < 360000):  # idle only near camera
-                # Moving units play their movement clip; standing troops during
-                # playback get their idle stance (frame-0 cached pose) instead
-                # of the raw T-pose bind. Falls back to static on any failure.
                 arc = getattr(self.editor.file_menu, "resource_archive", None)
                 if self.owner.anim_renderer.render_animated(
                         arc, handler.textures, obj, modelname, currmtx,
