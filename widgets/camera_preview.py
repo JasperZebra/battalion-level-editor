@@ -713,7 +713,11 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self._target_chain = WaypointChain(target)
         else:
             self._target_chain = None
-        return self.resolve_pose(self._camera, self._chain, self._t,
+        # At rest the camera sits where it is placed in the level (matching the
+        # rendered camera model); it only moves onto its waypoint rail during
+        # playback/scrubbing. In-game, CameraSetWaypoint re-rails it the same way.
+        use_chain = self._chain if (self._playing or self._t > 0.0) else None
+        return self.resolve_pose(self._camera, use_chain, self._t,
                                  target, self._target_chain, self._t,
                                  self.camera_fov(self._camera))
 
