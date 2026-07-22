@@ -297,7 +297,8 @@ class LevelDataTreeView(QTreeWidget):
 
     def run_context_menu(self, pos):
         item = self.itemAt(pos)
-        print(item.text(0))
+        if item is None:
+            return
         QGuiApplication.clipboard().setText("\"{0}\"".format(item.text(0)))
         """if isinstance(item, (EnemyRoutePoint, )):
             context_menu = QMenu(self)

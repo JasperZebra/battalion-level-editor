@@ -310,10 +310,9 @@ class Graphics(object):
                 mtx.append(currmtx)
 
                 if obj.type in ("cMapZone", "cCoastZone", "cDamageZone", "cNogoHintZone"):
-                    if rw.dolphin.do_visualize() and obj.mtxoverride is not None:
-                        mtx = obj.mtxoverride
-                    else:
-                        mtx = obj.getmatrix().mtx
+                    # currmtx already carries the override and the clamped
+                    # display height, so zone wireframes sit on the terrain.
+                    mtx = currmtx
                     if obj in selected:
                         color = object_colors["SelectionColor"]
                     else:

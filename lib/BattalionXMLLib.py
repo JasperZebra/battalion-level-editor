@@ -1054,8 +1054,8 @@ class BattalionObject(object):
         currmtx = currbwmtx.mtx
         h = currmtx[13]
 
-        if self.type in ("cMapZone", ):
-            return h
+        # cMapZone previously kept its raw height, but zones are almost always
+        # stored at y=0 and rendered under the terrain; clamp them like the rest.
         #elif self.type == "cObjectiveMarker":
         #    if self.
 
