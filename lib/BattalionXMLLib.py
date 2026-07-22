@@ -1064,9 +1064,10 @@ class BattalionObject(object):
         sticktofloor = False
 
         if hasattr(self, "mStickToFloor"):
-            if not self.mStickToFloor:
-                return h
-            else:
+            # mStickToFloor=False still falls through: the stored height is
+            # usually 0 (the game grounds objects at load), so trusting it
+            # raw draws the object under the map.
+            if self.mStickToFloor:
                 sticktofloor = True
 
         if hasattr(self, "mLockToSurface"):
@@ -1090,7 +1091,11 @@ class BattalionObject(object):
         if locktosurface:
             return abs(currmtx[13]-height) + originalh
         elif sticktofloor:
-            return originalh+height
+            # Stored height is a small offset above the floor; huge values
+            # (e.g. 1000) are designer sentinels, not offsets - ground those.
+            return height + (originalh if abs(originalh) <= 20 else 0)
+        elif originalh - height > 500:
+            return height  # sentinel heights (y=1000) would float far above the map
         elif originalh < height:
             return height
         else:
