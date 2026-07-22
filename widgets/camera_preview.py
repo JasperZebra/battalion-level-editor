@@ -950,26 +950,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         """Move the ACTUAL units in the main viewport during playback via the
         display-only mtxoverride (same mechanism as Dolphin live view) - the
         objects' real edit data is never modified."""
-        lv = self.editor.level_view
-        level = self.editor.level_file
-        overrides = self.unit_overrides()
+        # Main-view unit movement is disabled (performance): cutscene motion
+        # renders in the preview only. The main viewport just refreshes the
+        # camera marker on the spline overlay at a low rate.
         self._tick_count += 1
-        moved = []
-        if overrides and level is not None:
-            lv.cutscene_anim_override = True
-            for objid, (pos, direction) in overrides.items():
-                obj = level.objects.get(objid)
-                if obj is not None:
-                    obj.set_mtx_override(_facing_matrix(pos, direction))
-                    self._overridden.add(objid)
-                    moved.append(obj)
-        # A full forced rebuild recomputes the whole scene and lags the editor;
-        # re-instance ONLY the moving units' models (forcespecific), at 30Hz.
-        if self._tick_count % 2 == 0:
-            if moved:
-                lv.do_redraw(forcespecific=moved)
-            else:
-                lv.do_redraw()
+        if self._tick_count % 6 == 0:
+            self.editor.level_view.do_redraw()
 
     def clear_main_view_overrides(self):
         lv = self.editor.level_view
