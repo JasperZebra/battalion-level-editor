@@ -416,8 +416,8 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
                     currmtx[13] = height
             if obj.type == "cTroop":
                 BWMatrix.static_rotate_y(currmtx, math.pi)
-            if override is not None and obj.type == "cTroop":
-                # Moving troops play their walk clip; fall back to static pose.
+            if override is not None:
+                # Moving units play their movement clip; fall back to static pose.
                 arc = getattr(self.editor.file_menu, "resource_archive", None)
                 if self.owner.anim_renderer.render_animated(
                         arc, handler.textures, obj, modelname, currmtx,

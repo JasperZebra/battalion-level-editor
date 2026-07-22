@@ -214,19 +214,41 @@ class AnimatedModel(object):
         return worlds
 
 
+class _TextureAdapter(object):
+    """The legacy node renderer passes raw bytes material names; the texture
+    archive expects clean lowercase strings. Bridge without touching lib/bw."""
+    def __init__(self, texarchive):
+        self.texarchive = texarchive
+
+    def get_texture(self, name):
+        try:
+            if isinstance(name, bytes):
+                name = name.split(b"\x00")[0].decode("latin-1", errors="replace")
+            name = name.strip().lower()
+            if not name:
+                return (None, 0)
+            return self.texarchive.get_texture(name)
+        except Exception:
+            return (None, 0)
+
+
 class AnimationRenderer(object):
     """Per-level cache of animated models/clips + the animated draw call."""
     def __init__(self):
         self.models = {}    # modelname -> AnimatedModel | None (failed)
         self.clips = {}     # animname -> (bones, frame_count) | None
         self.bindings = {}  # (modelname, animname) -> {node index: AnimBone}
+        self.poses = {}     # (modelname, animname, frame) -> worlds (shared!)
         self.no_anim = set()
+        self._adapter = None
 
     def clear(self):
         self.models = {}
         self.clips = {}
         self.bindings = {}
+        self.poses = {}
         self.no_anim = set()
+        self._adapter = None
 
     def move_anim_name(self, obj):
         """The unit's movement clip: base -> mAnimationSet -> walk/run slot."""
@@ -274,7 +296,15 @@ class AnimationRenderer(object):
                 return False
             amodel.ensure_lists()
             frame = int(t * FPS) % clip[1]
-            worlds = amodel.pose(binding, frame)
+            # Units share rigs and clips (all grunts, all vets, ...): compute
+            # each (model, clip, frame) pose once and reuse it for every unit.
+            posekey = (modelname, animname, frame)
+            worlds = self.poses.get(posekey)
+            if worlds is None:
+                worlds = amodel.pose(binding, frame)
+                self.poses[posekey] = worlds
+            if self._adapter is None or self._adapter.texarchive is not textures:
+                self._adapter = _TextureAdapter(textures)
 
             glPushMatrix()
             # Same stack as the static path: y/z swap, then instance placement.
@@ -288,7 +318,7 @@ class AnimationRenderer(object):
                     continue
                 glPushMatrix()
                 glMultMatrixf(numpy.asarray(worlds[i], dtype=numpy.float32).flatten(order="F"))
-                node.render(textures, None)
+                node.render(self._adapter, None)
                 glPopMatrix()
             glPopMatrix()
             return True
