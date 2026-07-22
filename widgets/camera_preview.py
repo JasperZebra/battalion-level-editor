@@ -416,7 +416,8 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
                     currmtx[13] = height
             if obj.type == "cTroop":
                 BWMatrix.static_rotate_y(currmtx, math.pi)
-            if override is not None or (self.owner._playing and obj.type == "cTroop"):
+            if override is not None or (self.owner._playing and obj.type == "cTroop"
+                                        and dx * dx + dz * dz < 360000):  # idle only near camera
                 # Moving units play their movement clip; standing troops during
                 # playback get their idle stance (frame-0 cached pose) instead
                 # of the raw T-pose bind. Falls back to static on any failure.
@@ -885,10 +886,11 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 if obj is not None:
                     obj.set_mtx_override(_facing_matrix(pos, direction))
                     self._overridden.add(objid)
-        # Rebuilding the main view's instance buffers every 33ms tick lags the
-        # editor badly; refresh moving units at ~10Hz like Dolphin live view,
-        # cheap overlay-only repaints in between.
-        lv.do_redraw(force=bool(overrides) and self._tick_count % 3 == 0)
+        # Rebuilding/redrawing the main view every 33ms tick lags the editor
+        # badly; refresh it at ~10Hz like Dolphin live view (preview keeps
+        # its own full rate).
+        if self._tick_count % 3 == 0:
+            lv.do_redraw(force=bool(overrides))
 
     def clear_main_view_overrides(self):
         lv = self.editor.level_view
@@ -929,8 +931,17 @@ class CameraPreviewWidget(QtWidgets.QWidget):
 
     def overlay_state(self):
         """State for the main-viewport spline overlay (plugin_camera_preview_overlay):
-        {"poschain": [...], "aimchain": [...], "campos": ..., "lookat": ...,
-         "units": [(pos, dir), ...]} in BW world coords, or None when inactive."""
+        {"poschain": [...], "aimchain": [...], "campos": ..., "lookat": ...}
+        in BW world coords, or None when inactive. Cached per playback time -
+        the main view repaints more often than the state changes."""
+        cache = getattr(self, "_overlay_cache", None)
+        if cache is not None and cache[0] == (self._t, id(self._camera), id(self._active_cutscene)):
+            return cache[1]
+        state = self._overlay_state_uncached()
+        self._overlay_cache = ((self._t, id(self._camera), id(self._active_cutscene)), state)
+        return state
+
+    def _overlay_state_uncached(self):
         try:
             if self.editor.level_file is None:
                 return None
