@@ -780,11 +780,15 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             return
         self._t = start_time
         self._playing = True
+        import lib.BattalionXMLLib as bwxml
+        bwxml.HEIGHT_CACHE_ENABLED = True
         self.button_play.setText("Stop")
         self.timer.start()
 
     def stop_play(self):
         self._playing = False
+        import lib.BattalionXMLLib as bwxml
+        bwxml.HEIGHT_CACHE_ENABLED = False
         self.timer.stop()
         self.button_play.setText("Play")
         if self.editor.level_view is not None:

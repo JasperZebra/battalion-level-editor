@@ -19,6 +19,8 @@ for x in fieldnames.values():
     for y in x:
         bwfieldnames.add(y)
 LOCALTESTING = False
+# Toggled by the camera preview during cutscene playback (see calculate_height).
+HEIGHT_CACHE_ENABLED = False
 if not LOCALTESTING:
     from lib.bw_types import convert_from, get_types, BWMatrix, convert_to
     from lib.vectors import Vector4
@@ -1112,6 +1114,23 @@ class BattalionObject(object):
         return anchor_y  # not forward-reachable (we're behind the anchor): flat deck
 
     def calculate_height(self, bwterrain, waterheight):
+        # During cutscene playback the scene rebuilds ~10x/s; heights of
+        # non-overridden objects cannot change then, so cache per position
+        # (bilinear sampling + link-chain walks are too slow to redo each tick).
+        if HEIGHT_CACHE_ENABLED:
+            mtx = self.getmatrix()
+            if mtx is None:
+                return None
+            key = (mtx.mtx[12], mtx.mtx[13], mtx.mtx[14], id(bwterrain))
+            cached = getattr(self, "_heightcache", None)
+            if cached is not None and cached[0] == key:
+                return cached[1]
+            value = self._calculate_height(bwterrain, waterheight)
+            self._heightcache = (key, value)
+            return value
+        return self._calculate_height(bwterrain, waterheight)
+
+    def _calculate_height(self, bwterrain, waterheight):
         currbwmtx = self.getmatrix()
         if currbwmtx is None:
             return None
