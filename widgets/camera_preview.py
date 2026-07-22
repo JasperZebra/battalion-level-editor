@@ -182,7 +182,7 @@ class CutsceneTimeline(object):
     RE_FADE = re.compile(r"CameraFade\(\s*constant\.(FADE_IN|FADE_OUT)\s*,\s*constant\.(WAIT|NO_WAIT)\s*,\s*([0-9.]+)")
     RE_FOLLOW = re.compile(r"FollowWaypoint\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)")
     RE_FOLLOWUNIT = re.compile(r"FollowUnit\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,")
-    RE_PHONE = re.compile(r"PhoneMessage\(\s*(\d+)\s*,\s*[\w.]+\s*,\s*-?\d+\s*,\s*([0-9.]+)")
+    RE_PHONE = re.compile(r"PhoneMessage\(\s*(\d+)\s*,\s*[\w.]+\s*,\s*-?\d+\s*,\s*([0-9.]+)\s*,\s*([\w.]+)")
     RE_GOTO = re.compile(r"GoToArea\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
     RE_KILL = re.compile(r"\bKill\(\s*([\w.]+)\s*\)")
     GOTO_SPEED = 10.0
@@ -268,7 +268,9 @@ class CutsceneTimeline(object):
             m = self.RE_PHONE.search(line)
             if m is not None:
                 dur = float(m.group(2))
-                self.messages.append((clock, int(m.group(1)), dur if dur > 0 else 5.0))
+                sprite = resolve(m.group(3))
+                self.messages.append((clock, int(m.group(1)),
+                                      dur if dur > 0 else 5.0, sprite))
             m = self.RE_WAIT.search(line)
             if m is not None:
                 clock += float(m.group(1))
@@ -370,6 +372,7 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
                   lookat[0], lookat[2], lookat[1], 0.0, 0.0, 1.0)
         glEnable(GL_DEPTH_TEST)
 
+        self.owner.ensure_phone_textures(lv.bwmodelhandler.textures)
         self._render_terrain(lv)
         self._render_objects(lv, campos)
         self._render_water(lv)
@@ -638,6 +641,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._level_ref = level
         self._strings = None
         self._strings_tried = False
+        self._phone_tex_ready = False
+        self._phone_pixmaps = {}
         self._camera = None
         self._chain = None
         self._target_chain = None
@@ -1072,23 +1077,126 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 pass
         return "[Transmission #{0}]".format(msgid)
 
+    def sprite_texture_name(self, sprite_obj):
+        """cScriptSprite -> cSprite -> sSpriteBasetype -> texture resource name."""
+        if sprite_obj is None:
+            return None
+        seen = [sprite_obj]
+        for _ in range(3):
+            nxt = []
+            for node in seen:
+                for ref in getattr(node, "references", []) or []:
+                    if ref.type == "cTextureResource":
+                        return getattr(ref, "mName", None)
+                    nxt.append(ref)
+            seen = nxt
+        return None
+
+    def phone_texture(self, name):
+        """Decoded PNG (from the editor's texture cache) as QPixmap, or None.
+        The GL paint path pre-caches names via ensure_phone_textures."""
+        if not name:
+            return None
+        cache = getattr(self, "_phone_pixmaps", None)
+        if cache is None:
+            cache = self._phone_pixmaps = {}
+        key = name.lower()
+        if key not in cache:
+            path = os.path.join("texture_cache", key + ".png")
+            cache[key] = QtGui.QPixmap(path) if os.path.exists(path) else None
+        return cache[key]
+
+    def ensure_phone_textures(self, texarchive):
+        """Called from the preview GL paint (context current): force-decode the
+        phone UI textures into the PNG cache once per level."""
+        if getattr(self, "_phone_tex_ready", False):
+            return
+        names = ["CO_DIALOGUE_01"]
+        if self._active_cutscene is not None:
+            for entry in self._active_cutscene.messages:
+                tex = self.sprite_texture_name(entry[3])
+                if tex:
+                    names.append(tex)
+        try:
+            for name in names:
+                texarchive.get_texture(name.lower())
+            self._phone_tex_ready = True
+        except Exception:
+            self._phone_tex_ready = True  # fall back to plain bar
+
     def update_message(self):
-        """Show the active PhoneMessage over the preview, like the game."""
+        """Show the active PhoneMessage over the preview, game-accurate:
+        CO_DIALOGUE_01 atlas box at the TOP of the screen with the CO portrait
+        (see decomp/phone_message_gui_analysis.md)."""
         active = None
         if self._active_cutscene is not None and (self._playing or self._t > 0.0):
-            for time, msgid, duration in self._active_cutscene.messages:
-                if time <= self._t < time + duration:
-                    active = msgid
-        if active != self._msg_current:
-            self._msg_current = active
+            for entry in self._active_cutscene.messages:
+                if entry[0] <= self._t < entry[0] + entry[2]:
+                    active = entry
+        key = None if active is None else (active[1], self.glview.width())
+        if key != self._msg_current:
+            self._msg_current = key
             if active is None:
                 self.msg_label.hide()
             else:
-                self.msg_label.setText(self.message_text(active))
+                pixmap = self.compose_phone_box(self.message_text(active[1]),
+                                                self.sprite_texture_name(active[3]))
+                if pixmap is not None:
+                    self.msg_label.setStyleSheet("background: transparent;")
+                    self.msg_label.setPixmap(pixmap)
+                    # Game layout: box spans x 23.5%..97.5%, top at 7.8% (of 640x480).
+                    self.msg_label.setGeometry(int(self.glview.width() * 0.235),
+                                               int(self.glview.height() * 0.078),
+                                               pixmap.width(), pixmap.height())
+                else:
+                    self.msg_label.setStyleSheet(
+                        "background-color: rgba(10, 20, 35, 190); color: white;"
+                        "border: 1px solid rgba(120, 180, 255, 150); padding: 4px;"
+                        "font-size: 8pt;")
+                    self.msg_label.setText(self.message_text(active[1]))
+                    self.msg_label.setGeometry(6, 4, max(self.glview.width() - 12, 50), 52)
                 self.msg_label.show()
-        if active is not None:
-            self.msg_label.setGeometry(6, max(self.glview.height() - 64, 0),
-                                       max(self.glview.width() - 12, 50), 58)
+
+    def compose_phone_box(self, text, portrait_name):
+        """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops:
+        left cap (0,2,29x97), stretch middle (32,2,60x97), right portrait
+        frame (63,2,128x146), portrait centered in the frame, text in the
+        game's text rect. Returns None if textures aren't cached yet."""
+        atlas = self.phone_texture("CO_DIALOGUE_01")
+        if atlas is None or atlas.isNull():
+            return None
+        scale = (self.glview.width() * 0.74) / 473.5
+        w = int(473.5 * scale)
+        h = int(146 * scale)
+        out = QtGui.QPixmap(w, h)
+        out.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(out)
+        sm = QtCore.Qt.TransformationMode.SmoothTransformation
+        left = atlas.copy(0, 2, 29, 97).scaled(int(29 * scale), int(97 * scale), transformMode=sm)
+        right = atlas.copy(63, 2, 128, 146).scaled(int(128 * scale), int(146 * scale), transformMode=sm)
+        mid_w = w - left.width() - right.width()
+        middle = atlas.copy(32, 2, 60, 97).scaled(max(mid_w, 1), left.height(), transformMode=sm)
+        painter.drawPixmap(0, 0, left)
+        painter.drawPixmap(left.width(), 0, middle)
+        painter.drawPixmap(w - right.width(), 0, right)
+        portrait = self.phone_texture(portrait_name)
+        if portrait is not None and not portrait.isNull():
+            pw, ph = int(64 * scale), int(80 * scale)
+            # Portrait center (555,89) => (404.5,51.5) relative to box origin.
+            painter.drawPixmap(int(404.5 * scale - pw / 2), int(51.5 * scale - ph / 2),
+                               portrait.scaled(pw, ph, transformMode=sm))
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        font = QtGui.QFont()
+        font.setPointSizeF(max(9.0 * scale * 2.2, 6.0))
+        font.setBold(True)
+        painter.setFont(font)
+        # Game text rect (screen 183..492 x, 48..126 y) relative to box origin.
+        painter.drawText(QtCore.QRect(int(32.5 * scale), int(10.5 * scale),
+                                      int(309 * scale), int(78 * scale)),
+                         int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                         | Qt.TextFlag.TextWordWrap, text)
+        painter.end()
+        return out
 
     # ------------------------------------------------------------------ overlay
 
