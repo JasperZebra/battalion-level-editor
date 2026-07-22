@@ -181,6 +181,8 @@ class CutsceneTimeline(object):
     RE_SETFOV = re.compile(r"CameraSetFOV\(\s*([\w.]+)\s*,\s*([0-9.]+)")
     RE_FADE = re.compile(r"CameraFade\(\s*constant\.(FADE_IN|FADE_OUT)\s*,\s*constant\.(WAIT|NO_WAIT)\s*,\s*([0-9.]+)")
     RE_FOLLOW = re.compile(r"FollowWaypoint\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)")
+    RE_FOLLOWUNIT = re.compile(r"FollowUnit\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,")
+    RE_PHONE = re.compile(r"PhoneMessage\(\s*(\d+)\s*,\s*[\w.]+\s*,\s*-?\d+\s*,\s*([0-9.]+)")
     RE_GOTO = re.compile(r"GoToArea\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
     RE_KILL = re.compile(r"\bKill\(\s*([\w.]+)\s*\)")
     GOTO_SPEED = 10.0
@@ -194,6 +196,7 @@ class CutsceneTimeline(object):
         self.fades = []    # (time, direction, duration)
         self.follows = []  # (time, unit_obj, "wp"|"area", wp_obj_or_xz, speed, conditional)
         self.kills = []    # (time, obj, conditional)
+        self.messages = []  # (time, msgid, duration) - PhoneMessage popups
         self.camera_first_time = {}  # camera obj -> earliest time it becomes active
         clock = 0.0
         has_camera_op = False
@@ -257,6 +260,15 @@ class CutsceneTimeline(object):
                 obj = resolve(m.group(1))
                 if obj is not None:
                     self.kills.append((clock, obj, conditional))
+            m = self.RE_FOLLOWUNIT.search(line)
+            if m is not None:
+                unit, tgt = resolve(m.group(1)), resolve(m.group(2))
+                if unit is not None and tgt is not None:
+                    self.follows.append((clock, unit, "unit", tgt, 7.0, conditional))
+            m = self.RE_PHONE.search(line)
+            if m is not None:
+                dur = float(m.group(2))
+                self.messages.append((clock, int(m.group(1)), dur if dur > 0 else 5.0))
             m = self.RE_WAIT.search(line)
             if m is not None:
                 clock += float(m.group(1))
@@ -563,6 +575,18 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self.glview = CameraPreviewGL(self, editor)
         layout.addWidget(self.glview, 1)
 
+        # In-game phone message (CO transmission) overlay, like the game's UI.
+        self.msg_label = QtWidgets.QLabel(self.glview)
+        self.msg_label.setWordWrap(True)
+        self.msg_label.setStyleSheet(
+            "background-color: rgba(10, 20, 35, 190); color: white;"
+            "border: 1px solid rgba(120, 180, 255, 150); padding: 4px;"
+            "font-size: 8pt;")
+        self.msg_label.hide()
+        self._strings = None
+        self._strings_tried = False
+        self._msg_current = None
+
         controls = QtWidgets.QHBoxLayout()
         controls.setSpacing(2)
         self.button_prev = QtWidgets.QPushButton("<")
@@ -612,6 +636,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         if level is self._level_ref:
             return
         self._level_ref = level
+        self._strings = None
+        self._strings_tried = False
         self._camera = None
         self._chain = None
         self._target_chain = None
@@ -906,6 +932,14 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 continue
             if kind == "wp":
                 points = [node[0] for node in WaypointChain(data).nodes]
+            elif kind == "unit":
+                # Trail the target: head to where it is now, then where it ends.
+                troutes = self._unit_routes.get(data.id)
+                if troutes:
+                    points = [troutes[-1].sample(time)[0], troutes[-1].points[-1]]
+                else:
+                    tpos = _obj_pos(data)
+                    points = [tpos] if tpos is not None else []
             else:
                 x, z = data
                 y = start_pos[1]
@@ -959,6 +993,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self.stop_play()
         if self._tick_count % 6 == 0:  # label relayout at 10Hz is plenty
             self.update_header()
+            self.update_message()
         # The static-scene display list brought preview paints to ~4ms, so the
         # preview runs at the full 60fps tick rate now.
         if self.isVisible():
@@ -1018,6 +1053,42 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self.set_camera(cameras[index % len(cameras)])
         self.update_header()
         self.glview.update()
+
+    def message_text(self, msgid):
+        """Resolve a PhoneMessage id through the level's .str strings file."""
+        if not self._strings_tried:
+            self._strings_tried = True
+            try:
+                from plugins.strings_editor.strings import BWLanguageFile
+                path = self.editor.file_menu.get_strings_path("English")
+                with open(path, "rb") as f:
+                    self._strings = BWLanguageFile(f)
+            except Exception:
+                self._strings = None
+        if self._strings is not None:
+            try:
+                return self._strings.get_message(msgid).get_message()
+            except Exception:
+                pass
+        return "[Transmission #{0}]".format(msgid)
+
+    def update_message(self):
+        """Show the active PhoneMessage over the preview, like the game."""
+        active = None
+        if self._active_cutscene is not None and (self._playing or self._t > 0.0):
+            for time, msgid, duration in self._active_cutscene.messages:
+                if time <= self._t < time + duration:
+                    active = msgid
+        if active != self._msg_current:
+            self._msg_current = active
+            if active is None:
+                self.msg_label.hide()
+            else:
+                self.msg_label.setText(self.message_text(active))
+                self.msg_label.show()
+        if active is not None:
+            self.msg_label.setGeometry(6, max(self.glview.height() - 64, 0),
+                                       max(self.glview.width() - 12, 50), 58)
 
     # ------------------------------------------------------------------ overlay
 
