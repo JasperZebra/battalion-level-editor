@@ -1056,13 +1056,6 @@ class BattalionObject(object):
 
         # cMapZone previously kept its raw height, but zones are almost always
         # stored at y=0 and rendered under the terrain; clamp them like the rest.
-        # Bridges (DIFLAG_IS_NAVIGABLE_BRIDGE / INFANTRY_ONLY_BRIDGE) span
-        # gorges and water: clamping each piece to the terrain below breaks the
-        # deck line, so they keep their authored height.
-        if self.type == "cDestroyableObject":
-            flags = getattr(self, "mInstanceFlags", None)
-            if flags is not None and flags & 0x21:
-                return h
         #elif self.type == "cObjectiveMarker":
         #    if self.
 
