@@ -36,7 +36,7 @@ from widgets.camera_preview_anim import AnimationRenderer
 
 DEFAULT_FOV = 58.0
 FAR_PLANE = 4000.0
-DRAW_DISTANCE = 3000.0
+DRAW_DISTANCE = 1500.0
 CHAIN_LIMIT = 64
 TAIL_TIME = 2.0
 STATIC_SHOT_TIME = 4.0
@@ -868,7 +868,10 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         if self._t >= self._duration:
             self.stop_play()
         self.update_header()
-        self.glview.update()
+        # The preview re-renders the whole scene per frame (immediate mode);
+        # 15fps keeps playback smooth enough without starving the editor.
+        if self._tick_count % 2 == 0 and self.isVisible():
+            self.glview.update()
         self.apply_main_view_overrides()
 
     def apply_main_view_overrides(self):
