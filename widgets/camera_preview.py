@@ -920,6 +920,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
     def tick(self):
         import time
         tick_start = time.perf_counter()
+        last = getattr(self, "_last_tick", None)
+        if last is not None:
+            # Scheduled every 33ms; a big gap = the main thread is blocked
+            # (by main-view painting), which IS the perceived lag.
+            self.perf_note("tick_gap", tick_start - last)
+        self._last_tick = tick_start
         self._t += self.timer.interval() / 1000.0
         if self._t >= self._duration:
             self.stop_play()
