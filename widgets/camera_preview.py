@@ -641,7 +641,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._level_ref = level
         self._strings = None
         self._strings_tried = False
-        self._phone_tex_ready = False
+        self._phone_tex_done = set()
         self._phone_pixmaps = {}
         self._camera = None
         self._chain = None
@@ -1108,21 +1108,27 @@ class CameraPreviewWidget(QtWidgets.QWidget):
 
     def ensure_phone_textures(self, texarchive):
         """Called from the preview GL paint (context current): force-decode the
-        phone UI textures into the PNG cache once per level."""
-        if getattr(self, "_phone_tex_ready", False):
-            return
+        phone UI textures into the PNG cache. Retries per name so portraits of
+        a cutscene chosen AFTER the first paint still get cached."""
+        done = getattr(self, "_phone_tex_done", None)
+        if done is None:
+            done = self._phone_tex_done = set()
         names = ["CO_DIALOGUE_01"]
         if self._active_cutscene is not None:
             for entry in self._active_cutscene.messages:
                 tex = self.sprite_texture_name(entry[3])
                 if tex:
                     names.append(tex)
-        try:
-            for name in names:
-                texarchive.get_texture(name.lower())
-            self._phone_tex_ready = True
-        except Exception:
-            self._phone_tex_ready = True  # fall back to plain bar
+        for name in names:
+            key = name.lower()
+            if key in done:
+                continue
+            try:
+                texarchive.get_texture(key)
+            except Exception:
+                pass
+            done.add(key)
+            self._phone_pixmaps.pop(key, None)  # retry pixmap load from cache
 
     def update_message(self):
         """Show the active PhoneMessage over the preview, game-accurate:
@@ -1133,7 +1139,9 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             for entry in self._active_cutscene.messages:
                 if entry[0] <= self._t < entry[0] + entry[2]:
                     active = entry
-        key = None if active is None else (active[1], self.glview.width())
+        portrait_ok = (active is not None and
+                       self.phone_texture(self.sprite_texture_name(active[3])) is not None)
+        key = None if active is None else (active[1], self.glview.width(), portrait_ok)
         if key != self._msg_current:
             self._msg_current = key
             if active is None:
@@ -1175,7 +1183,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         left = atlas.copy(0, 2, 29, 97).scaled(int(29 * scale), int(97 * scale), transformMode=sm)
         right = atlas.copy(63, 2, 128, 146).scaled(int(128 * scale), int(146 * scale), transformMode=sm)
         mid_w = w - left.width() - right.width()
-        middle = atlas.copy(32, 2, 60, 97).scaled(max(mid_w, 1), left.height(), transformMode=sm)
+        # Atlas rects are (x0,y0,x1,y1): middle strip is 32..60 = 28px wide.
+        middle = atlas.copy(32, 2, 28, 97).scaled(max(mid_w, 1), left.height(), transformMode=sm)
         painter.drawPixmap(0, 0, left)
         painter.drawPixmap(left.width(), 0, middle)
         painter.drawPixmap(w - right.width(), 0, right)
