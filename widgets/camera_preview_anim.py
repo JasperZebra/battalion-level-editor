@@ -250,33 +250,41 @@ class AnimationRenderer(object):
         self.no_anim = set()
         self._adapter = None
 
-    def move_anim_name(self, obj):
-        """The unit's movement clip: base -> mAnimationSet -> walk/run slot."""
+    MOVE_SLOTS = ("mWalkAnimation", "mRunAnimation", "mMoveAnimation")
+    IDLE_SLOTS = ("mIdleAnimation", "mCrouchIdleAnimation", "mStandAnimation",
+                  "mWalkAnimation")
+
+    def move_anim_name(self, obj, slots=MOVE_SLOTS):
+        """A unit's clip name: base -> mAnimationSet -> first filled slot."""
         base = getattr(obj, "mBase", None)
         aset = getattr(base, "mAnimationSet", None)
-        for slot in ("mWalkAnimation", "mRunAnimation", "mMoveAnimation"):
+        for slot in slots:
             res = getattr(aset, slot, None)
             name = getattr(res, "mName", None)
             if name:
                 return name
         return None
 
-    def render_animated(self, arc, textures, obj, modelname, placement, t, is_bw1):
+    def render_animated(self, arc, textures, obj, modelname, placement, t, is_bw1,
+                        idle=False):
         """Draw obj's model posed by its movement clip at time t under the
         already-applied placement matrix. Returns False to use the static path."""
-        if arc is None or obj.id in self.no_anim:
+        blacklist_key = (obj.id, idle)
+        if arc is None or blacklist_key in self.no_anim:
             return False
         try:
-            animname = self.move_anim_name(obj)
+            animname = self.move_anim_name(obj, self.IDLE_SLOTS if idle else self.MOVE_SLOTS)
             if animname is None:
-                self.no_anim.add(obj.id)
+                self.no_anim.add(blacklist_key)
                 return False
+            if idle:
+                t = 0.0  # one cached pose per model - standing stance, no per-frame cost
             if animname not in self.clips:
                 res = arc.get_resource(b"MINA", animname)
                 self.clips[animname] = decode_mina(res.data, is_bw1) if res is not None else None
             clip = self.clips[animname]
             if clip is None:
-                self.no_anim.add(obj.id)
+                self.no_anim.add(blacklist_key)
                 return False
             if modelname not in self.models:
                 try:
@@ -292,7 +300,7 @@ class AnimationRenderer(object):
                 self.bindings[key] = amodel.bind_clip(clip[0], is_bw1)
             binding = self.bindings[key]
             if not binding:
-                self.no_anim.add(obj.id)
+                self.no_anim.add(blacklist_key)
                 return False
             amodel.ensure_lists()
             frame = int(t * FPS) % clip[1]
@@ -324,5 +332,5 @@ class AnimationRenderer(object):
             return True
         except Exception:
             traceback.print_exc()
-            self.no_anim.add(obj.id)
+            self.no_anim.add(blacklist_key)
             return False
