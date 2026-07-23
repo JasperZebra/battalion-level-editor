@@ -172,6 +172,33 @@ def _facing_matrix(pos, direction):
                         pos[0], pos[1], pos[2], 1.0], dtype=numpy.float32)
 
 
+def schedule_messages(raw_messages, clears, background=None):
+    """Game-accurate global message queue: back-to-back playback in call
+    order; ClearMessageQueue drops not-yet-shown entries. Background-script
+    messages (approximate clocks) append AFTER the cutscene's own dialogue
+    and never clear the queue."""
+    scheduled = []
+    queue_end = 0.0
+    items = sorted([("m",) + msg[:5] for msg in raw_messages]
+                   + [("c", t) for t, cond in clears], key=lambda e: e[1])
+    for item in items:
+        if item[0] == "c":
+            t = item[1]
+            scheduled = [s for s in scheduled if s[0] <= t]
+            queue_end = max([t] + [s[0] + s[2] for s in scheduled if s[0] <= t])
+        else:
+            _, t, msgid, dur, sprite, army = item
+            start = max(t, queue_end)
+            scheduled.append((start, msgid, dur, sprite, army))
+            queue_end = start + dur
+    for msg in sorted(background or [], key=lambda m: m[0]):
+        t, msgid, dur, sprite, army = msg[:5]
+        start = max(t, queue_end)
+        scheduled.append((start, msgid, dur, sprite, army))
+        queue_end = start + dur
+    return scheduled
+
+
 class CutsceneTimeline(object):
     """One Lua script's camera timeline: timed events + derived shot list."""
     RE_WAIT = re.compile(r"WaitFor\(\s*([0-9.]+)\s*\)")
@@ -272,29 +299,16 @@ class CutsceneTimeline(object):
                 dur = float(m.group(3))
                 sprite = resolve(m.group(4))
                 self.messages.append((clock, int(m.group(1)), dur if dur > 0 else 5.0,
-                                      sprite, int(m.group(2))))
+                                      sprite, int(m.group(2)), conditional))
             if self.RE_CLEARQ.search(line):
-                self._msg_clears.append(clock)
+                self._msg_clears.append((clock, conditional))
             m = self.RE_WAIT.search(line)
             if m is not None:
                 clock += float(m.group(1))
         # Phone messages QUEUE in-game: stacked calls play back to back, each
         # for its own duration; ClearMessageQueue drops not-yet-shown ones.
-        scheduled = []
-        queue_end = 0.0
-        items = sorted([("m",) + msg for msg in self.messages]
-                       + [("c", t) for t in self._msg_clears], key=lambda e: e[1])
-        for item in items:
-            if item[0] == "c":
-                t = item[1]
-                scheduled = [s for s in scheduled if s[0] <= t]
-                queue_end = max([t] + [s[0] + s[2] for s in scheduled if s[0] <= t])
-            else:
-                _, t, msgid, dur, sprite, army = item
-                start = max(t, queue_end)
-                scheduled.append((start, msgid, dur, sprite, army))
-                queue_end = start + dur
-        self.messages = scheduled
+        self.raw_messages = list(self.messages)
+        self.messages = schedule_messages(self.raw_messages, self._msg_clears)
         self.valid = has_camera_op
         self.duration = clock + TAIL_TIME
         # A shot starts wherever the camera is cut or re-railed.
@@ -1018,6 +1032,15 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         previous route put the unit at that moment."""
         self._unit_routes = {}
         follows, self._merged_kills = self.gather_movement()
+        # Messages merge across scripts too (all scripts start together);
+        # the global queue orders background dialogue after the cutscene's own.
+        background = []
+        for timeline in self._all_timelines:
+            if timeline is not self._active_cutscene:
+                background.extend(m for m in timeline.raw_messages if not m[5])
+        self._merged_messages = schedule_messages(
+            self._active_cutscene.raw_messages, self._active_cutscene._msg_clears,
+            background)
         bwterrain = self.editor.level_view.bwterrain
         for time, unit, kind, data, speed in follows:
             objid = unit.id
@@ -1229,7 +1252,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         (see decomp/phone_message_gui_analysis.md)."""
         active = None
         if self._active_cutscene is not None and (self._playing or self._t > 0.0):
-            for entry in self._active_cutscene.messages:
+            msgs = getattr(self, "_merged_messages", None) or self._active_cutscene.messages
+            for entry in msgs:
                 if entry[0] <= self._t < entry[0] + entry[2]:
                     active = entry
         portrait_ok = (active is not None and
