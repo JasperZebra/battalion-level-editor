@@ -15,11 +15,12 @@
    new file over edits scattered across existing ones. No drive-by refactors, no
    reformatting, no "while I'm here" cleanups, no fixing unrelated dead code unless
    asked. If a feature's footprint starts growing beyond what was agreed, stop and say so.
-2. **Commit after every completed feature or fix — but NEVER push.** Each feature/fix
-   gets its own commit with a clear message as soon as it works. Do not push to any
-   remote unless the user explicitly asks. (The branch
-   `personal_do_not_push_only_commit` additionally has its pushRemote pointed at a
-   nonexistent remote as a safety latch.)
+2. **Commit AND push after every completed feature or fix.** Each feature/fix gets
+   its own commit with a clear message as soon as it works, then push to origin.
+   Exception: the branch `personal_do_not_push_only_commit` is NEVER pushed (its
+   pushRemote points at a nonexistent remote as a safety latch).
+3. **No Claude/AI attribution in anything GitHub-bound.** Commit messages carry no
+   Co-Authored-By trailers or AI mentions; commits use the user's git identity only.
 
 ---
 
