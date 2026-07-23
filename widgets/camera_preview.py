@@ -123,7 +123,8 @@ class WaypointChain(object):
 
 class UnitRoute(object):
     """A scripted unit movement: walk a polyline at a speed."""
-    def __init__(self, start_time, start_pos, points, speed):
+    def __init__(self, start_time, start_pos, points, speed, fixed_dir=None):
+        self.fixed_dir = fixed_dir
         self.start_time = start_time
         self.speed = speed if speed > 0.01 else 5.0
         self.points = [start_pos] + list(points)
@@ -155,7 +156,9 @@ class UnitRoute(object):
                 walked += seg
         dx, dz = b[0] - a[0], b[2] - a[2]
         length = math.hypot(dx, dz)
-        if length < 1e-5:
+        if self.fixed_dir is not None:
+            direction = self.fixed_dir
+        elif length < 1e-5:
             direction = (0.0, 1.0)
         else:
             direction = (dx / length, dz / length)
@@ -212,6 +215,9 @@ class CutsceneTimeline(object):
     RE_PHONE = re.compile(r"PhoneMessage\(\s*(\d+)\s*,\s*[\w.]+\s*,\s*(-?\d+)\s*,\s*([0-9.]+)\s*,\s*([\w.]+)")
     RE_CLEARQ = re.compile(r"ClearMessageQueue\(")
     RE_GOTO = re.compile(r"GoToArea\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
+    RE_TELEPORT = re.compile(r"\bTeleport\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
+    RE_SPAWN = re.compile(r"\bSpawn\(\s*([\w.]+)\s*\)")
+    RE_DESPAWN = re.compile(r"\bDespawn\(\s*([\w.]+)\s*\)")
     RE_KILL = re.compile(r"\bKill\(\s*([\w.]+)\s*\)")
     GOTO_SPEED = 10.0
 
@@ -224,6 +230,7 @@ class CutsceneTimeline(object):
         self.fades = []    # (time, direction, duration)
         self.follows = []  # (time, unit_obj, "wp"|"area", wp_obj_or_xz, speed, conditional)
         self.kills = []    # (time, obj, conditional)
+        self.spawns = []   # (time, obj, visible, conditional) - Spawn/Despawn
         self.messages = []  # (start, msgid, duration, sprite, army) - queued popups
         self._msg_clears = []
         self.camera_first_time = {}  # camera obj -> earliest time it becomes active
@@ -289,6 +296,23 @@ class CutsceneTimeline(object):
                 obj = resolve(m.group(1))
                 if obj is not None:
                     self.kills.append((clock, obj, conditional))
+            m = self.RE_TELEPORT.search(line)
+            if m is not None:
+                unit = resolve(m.group(1))
+                if unit is not None:
+                    dest = (float(m.group(2)), float(m.group(3)), float(m.group(4)))
+                    self.follows.append((clock, unit, "tp", dest, 1e9, conditional))
+            m = self.RE_DESPAWN.search(line)
+            if m is not None:
+                obj = resolve(m.group(1))
+                if obj is not None:
+                    self.spawns.append((clock, obj, False, conditional))
+            else:
+                m = self.RE_SPAWN.search(line)
+                if m is not None:
+                    obj = resolve(m.group(1))
+                    if obj is not None:
+                        self.spawns.append((clock, obj, True, conditional))
             m = self.RE_FOLLOWUNIT.search(line)
             if m is not None:
                 unit, tgt = resolve(m.group(1)), resolve(m.group(2))
@@ -509,7 +533,7 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         # per-frame Python GL overhead was ~40ms/frame without this.
         vismenu = getattr(lv, "visibility_menu", None)
         full_scenery = vismenu is not None and vismenu.show_full_scenery()
-        dynamic_ids = set(self.owner._unit_routes)
+        dynamic_ids = set(self.owner._unit_routes) | getattr(self.owner, "_spawn_actor_ids", set())
         static_key = (id(self.editor.level_file), frozenset(dynamic_ids),
                       self.owner._filter_gen, full_scenery)
         if self._static_key == static_key and self._static_list is not None:
@@ -669,6 +693,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._unit_routes = {}         # objid -> [UnitRoute] sorted by start time
         self._all_timelines = []       # every level script, for background movement
         self._merged_kills = []
+        self._merged_spawns = []
+        self._spawn_actor_ids = set()
         self._parse_retries = 0
         self._overridden = set()       # objids with an active display override
         self._tick_count = 0
@@ -762,6 +788,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._unit_routes = {}
         self._all_timelines = []
         self._merged_kills = []
+        self._merged_spawns = []
+        self._spawn_actor_ids = set()
         self._parse_retries = 3
         self.stop_play()
         self._cutscenes = []
@@ -1040,6 +1068,13 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         # Dialogue comes from the cutscene's own script only (verified in-game:
         # background scripts' messages belong to gameplay, not the cutscene).
         self._merged_messages = None
+        spawns = [entry[:3] for entry in self._active_cutscene.spawns]
+        for timeline in self._all_timelines:
+            if timeline is not self._active_cutscene:
+                spawns.extend(e[:3] for e in timeline.spawns if not e[3])
+        spawns.sort(key=lambda e: e[0])
+        self._merged_spawns = spawns
+        self._spawn_actor_ids = set(obj.id for t, obj, vis in spawns)
         bwterrain = self.editor.level_view.bwterrain
         for time, unit, kind, data, speed in follows:
             objid = unit.id
@@ -1050,7 +1085,18 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 start_pos = _obj_pos(unit)
             if start_pos is None:
                 continue
-            if kind == "wp":
+            fixed_dir = None
+            if kind == "tp":
+                x, z, yaw = data
+                rad = math.radians(yaw)
+                fixed_dir = (math.sin(rad), math.cos(rad))
+                y = start_pos[1]
+                if bwterrain is not None:
+                    ty = bwterrain.check_height(x, z)
+                    if ty is not None:
+                        y = ty
+                points = [(x, y, z)]
+            elif kind == "wp":
                 points = [node[0] for node in WaypointChain(data).nodes]
             elif kind == "unit":
                 # Trail the target: head to where it is now, then where it ends.
@@ -1070,7 +1116,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 points = [(x, y, z)]
             if not points:
                 continue
-            routes.append(UnitRoute(time, start_pos, points, speed))
+            routes.append(UnitRoute(time, start_pos, points, speed, fixed_dir))
 
     def unit_overrides(self):
         """objid -> (pos, direction) for scripted units at the current time."""
@@ -1087,10 +1133,19 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         return overrides
 
     def killed_units(self):
-        """Object ids the scripts have removed (Kill) by the current time."""
+        """Object ids hidden at the current time: Kill victims plus Despawned
+        units (a unit whose FIRST event is Spawn starts hidden)."""
         if self._active_cutscene is None:
             return set()
-        return set(obj.id for time, obj in self._merged_kills if time <= self._t)
+        hidden = set(obj.id for time, obj in self._merged_kills if time <= self._t)
+        state = {}
+        for time, obj, visible in getattr(self, "_merged_spawns", []):
+            if obj.id not in state:
+                state[obj.id] = not visible  # before first event: opposite
+            if time <= self._t:
+                state[obj.id] = visible
+        hidden.update(objid for objid, visible in state.items() if not visible)
+        return hidden
 
     def perf_note(self, name, seconds):
         stats = getattr(self, "_perf", None)
