@@ -1709,15 +1709,21 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             disc_w, disc_h, transformMode=sm))
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            # Topmost and large - the baked vignette blends it over the ring.
-            # Facing the text (source art faces slightly left, so the friendly
-            # left-side portrait is mirrored), nudged 0.75 right.
+            # Topmost and large, but clipped to the ring's inner circle so the
+            # head never escapes the medallion. Facing the text (source art
+            # faces slightly left, so the friendly left-side portrait is
+            # mirrored), nudged 0.75 right.
             pw, ph = int(62 * sx), int(77 * sy)
             if not enemy:
                 portrait = portrait.transformed(QtGui.QTransform().scale(-1, 1))
+            painter.save()
+            clip = QtGui.QPainterPath()
+            clip.addEllipse(QtCore.QPointF(disc_cx, disc_cy), 30.5 * sx, 33.0 * sy)
+            painter.setClipPath(clip)
             painter.drawPixmap(int(disc_cx + 0.75 * sx - pw / 2),
                                int(disc_cy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
+            painter.restore()
         # Lightning flip-book (CODIALOGUEflash, 3x3 sheet, 7 frames) blinking
         # at the medallion's outer top rim while the message opens.
         flash = self.phone_texture("CODIALOGUEflash")
