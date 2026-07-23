@@ -407,8 +407,22 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         key = id(self.editor.level_file)
         if getattr(self, "_sky_key", None) != key:
             self._sky_key = key
-            self._sky_name = next(
-                (n for n in lv.bwmodelhandler.models if "skydome" in n.lower()), None)
+            self._sky_name = None
+            self._sky_params = (100.0, 0.5, 45.0)
+            for obj in self.editor.level_file.objects.values():
+                if obj.type == "cRenderParams":
+                    dome = getattr(obj, "mpWorldSkydome", None)
+                    name = getattr(dome, "mName", None)
+                    if name and name in lv.bwmodelhandler.models:
+                        self._sky_name = name
+                    self._sky_params = (
+                        getattr(obj, "mfSkydomeSize", 100.0) or 100.0,
+                        getattr(obj, "mfSkydomeHeightFactorUp", 0.5) or 0.5,
+                        getattr(obj, "mfSkydomeHeightHorizonPos", 45.0) or 45.0)
+                    break
+            if self._sky_name is None:
+                self._sky_name = next(
+                    (n for n in lv.bwmodelhandler.models if "skydome" in n.lower()), None)
         if self._sky_name is None:
             return
         try:
@@ -418,11 +432,9 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             glDepthMask(GL_FALSE)
             glColor4f(1.0, 1.0, 1.0, 1.0)
             import numpy
-            model = lv.bwmodelhandler.models[self._sky_name]
-            radius = max(getattr(model, "boundsphereradius", 300.0), 1.0)
-            s = 3500.0 / radius  # native dome is tiny (~300u); span the far plane
-            mtx = numpy.array([s, 0, 0, 0,  0, s, 0, 0,  0, 0, s, 0,
-                               campos[0], campos[1], campos[2], 1], dtype=numpy.float32)
+            size, up, horizon = self._sky_params
+            mtx = numpy.array([size, 0, 0, 0,  0, size * up, 0, 0,  0, 0, size, 0,
+                               campos[0], horizon, campos[2], 1], dtype=numpy.float32)
             lv.bwmodelhandler.rendermodel(self._sky_name, mtx, None, 0)
         except Exception:
             if not getattr(self, "_sky_error", False):
@@ -1187,7 +1199,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         done = getattr(self, "_phone_tex_done", None)
         if done is None:
             done = self._phone_tex_done = set()
-        names = ["CO_DIALOGUE_01", "CO_DIALOGUE_02"]
+        names = ["CO_DIALOGUE_01", "CO_DIALOGUE_02", "CO_box_lightning"]
         if self._active_cutscene is not None:
             for entry in self._active_cutscene.messages:
                 tex = self.sprite_texture_name(entry[3])
@@ -1215,7 +1227,9 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     active = entry
         portrait_ok = (active is not None and
                        self.phone_texture(self.sprite_texture_name(active[3])) is not None)
-        key = None if active is None else (active[1], self.glview.width(), portrait_ok)
+        self._spark_frame = int(self._t * 10) % 7
+        key = None if active is None else (active[1], self.glview.width(), portrait_ok,
+                                           self._spark_frame)
         if key != self._msg_current:
             self._msg_current = key
             if active is None:
@@ -1223,7 +1237,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             else:
                 pixmap = self.compose_phone_box(self.message_text(active[1]),
                                                 self.sprite_texture_name(active[3]),
-                                                active[4])
+                                                active[4], self._spark_frame)
                 if pixmap is not None:
                     self.msg_label.setStyleSheet("background: transparent;")
                     self.msg_label.setPixmap(pixmap)
@@ -1245,7 +1259,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
     ARMY_TINTS = {0: (120, 170, 80), 1: (75, 110, 125), 2: (198, 50, 50),
                   3: (245, 208, 80), 4: (144, 112, 144)}
 
-    def compose_phone_box(self, text, portrait_name, army=0):
+    def compose_phone_box(self, text, portrait_name, army=0, spark_frame=0):
         """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops,
         mapped in 640x480 screen space per axis so proportions match the game
         at any preview aspect. Returns None if textures aren't cached yet."""
@@ -1306,6 +1320,16 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             painter.drawPixmap(0, 0, g_left)
             painter.drawPixmap(left.width(), 0, g_mid)
             painter.drawPixmap(w - right.width(), 0, g_right)
+        # Lightning flip-book (CO_box_lightning, 3x3 sheet, 7 frames) at the
+        # frame corner, center (560,155) screen => (409.5,117.5) box, 2.5x.
+        spark = self.phone_texture("CO_box_lightning")
+        if spark is not None and not spark.isNull():
+            cw, ch = spark.width() // 3, spark.height() // 3
+            fx, fy = (spark_frame % 7) % 3, (spark_frame % 7) // 3
+            cell = spark.copy(fx * cw, fy * ch, cw, ch).scaled(
+                int(cw * 2.5 * sx), int(ch * 2.5 * sy), transformMode=sm)
+            painter.drawPixmap(int(409.5 * sx - cell.width() / 2),
+                               int(117.5 * sy - cell.height() / 2), cell)
         # White for the player's army, yellow for the enemy (mEnemyTextColour).
         painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
                        else QtGui.QColor(255, 255, 0))
