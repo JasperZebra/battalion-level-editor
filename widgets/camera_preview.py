@@ -1234,7 +1234,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     active = entry
         portrait_ok = (active is not None and
                        self.phone_texture(self.sprite_texture_name(active[3])) is not None)
-        self._spark_frame = int(self._t * 10) % 7
+        # Lightning: one 7-frame pass at 10fps when the message opens, no loop.
+        if active is not None:
+            frame = int((self._t - active[0]) * 10)
+            self._spark_frame = frame if 0 <= frame <= 6 else None
+        else:
+            self._spark_frame = None
         key = None if active is None else (active[1], self.glview.width(), portrait_ok,
                                            self._spark_frame)
         if key != self._msg_current:
@@ -1330,16 +1335,14 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         # Lightning flip-book (CO_box_lightning, 3x3 sheet, 7 frames) at the
         # frame corner, center (560,155) screen => (409.5,117.5) box, 2.5x.
         spark = self.phone_texture("CO_box_lightning")
-        if spark is not None and not spark.isNull():
+        if spark_frame is not None and spark is not None and not spark.isNull():
             cw, ch = spark.width() // 3, spark.height() // 3
-            fx, fy = (spark_frame % 7) % 3, (spark_frame % 7) // 3
+            fx, fy = spark_frame % 3, spark_frame // 3
             cell = spark.copy(fx * cw, fy * ch, cw, ch).scaled(
                 int(cw * 2.5 * sx), int(ch * 2.5 * sy), transformMode=sm)
             painter.drawPixmap(int(409.5 * sx - cell.width() / 2),
                                int(117.5 * sy - cell.height() / 2), cell)
-        # White for the player's army, yellow for the enemy (mEnemyTextColour).
-        painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
-                       else QtGui.QColor(255, 255, 0))
+        painter.setPen(QtGui.QColor(255, 255, 255))  # CO text is always white
         font = QtGui.QFont()
         font.setPixelSize(max(int(14 * sy), 9))
         font.setBold(True)
