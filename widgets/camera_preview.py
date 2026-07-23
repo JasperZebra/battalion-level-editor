@@ -394,12 +394,38 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         glEnable(GL_DEPTH_TEST)
 
         self.owner.ensure_phone_textures(lv.bwmodelhandler.textures)
+        self._render_sky(lv, campos)
         self._render_terrain(lv)
         self._render_objects(lv, campos)
         self._render_water(lv)
 
         if fade > 0.001:
             self._render_fade(fade)
+
+    def _render_sky(self, lv, campos):
+        """Draw the level's skydome model camera-centered with no depth writes."""
+        key = id(self.editor.level_file)
+        if getattr(self, "_sky_key", None) != key:
+            self._sky_key = key
+            self._sky_name = next(
+                (n for n in lv.bwmodelhandler.models if "skydome" in n.lower()), None)
+        if self._sky_name is None:
+            return
+        try:
+            glEnable(GL_TEXTURE_2D)
+            glDisable(GL_ALPHA_TEST)
+            glDepthMask(GL_FALSE)
+            glColor4f(1.0, 1.0, 1.0, 1.0)
+            mtx = _facing_matrix((campos[0], campos[1], campos[2]), (0.0, 1.0))
+            lv.bwmodelhandler.rendermodel(self._sky_name, mtx, None, 0)
+        except Exception:
+            if not self._error_shown:
+                self._error_shown = True
+                traceback.print_exc()
+        finally:
+            glDepthMask(GL_TRUE)
+            glEnable(GL_ALPHA_TEST)
+            glDisable(GL_TEXTURE_2D)
 
     def _render_terrain(self, lv):
         if lv.bwterrain is None or lv.shader is None or not lv.terrainmap:
@@ -437,9 +463,11 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         # Everything that never moves (non-troops without an override) is
         # compiled once per level+route set into a single display list -
         # per-frame Python GL overhead was ~40ms/frame without this.
+        vismenu = getattr(lv, "visibility_menu", None)
+        full_scenery = vismenu is not None and vismenu.show_full_scenery()
         dynamic_ids = set(self.owner._unit_routes)
         static_key = (id(self.editor.level_file), frozenset(dynamic_ids),
-                      self.owner._filter_gen)
+                      self.owner._filter_gen, full_scenery)
         if self._static_key == static_key and self._static_list is not None:
             glCallList(self._static_list)
         elif getattr(self, "_static_warm", None) != static_key:
@@ -491,6 +519,25 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             if obj.type == "cTroop":
                 BWMatrix.static_rotate_y(currmtx, math.pi)
             handler.rendermodel(modelname, currmtx, None, 0)
+        # Full scenery: reuse the main view's SceneryHandler scatter (same
+        # RNG-accurate distribution) when its toggle is on.
+        if vismenu is not None and vismenu.show_full_scenery():
+            try:
+                scenery = self.editor.level_view.graphics.scenery
+                scenery.set_scenery(self.editor.level_file, vismenu.object_visible,
+                                    self.editor.level_file.is_bw2())
+                bwterrain = self.editor.level_view.bwterrain
+                for comp in scenery.components:
+                    if comp.modeltype is None or comp.modeltype not in handler.models:
+                        continue
+                    currmtx = comp.mtx.mtx.copy()
+                    if bwterrain is not None:
+                        h = bwterrain.check_height(currmtx[12], currmtx[14])
+                        if h is not None:
+                            currmtx[13] = h
+                    handler.rendermodel(comp.modeltype, currmtx, None, 0)
+            except Exception:
+                traceback.print_exc()
 
     def _render_dynamic(self, lv, campos, handler, overrides, killed, dynamic_ids):
         maxdist_sq = DRAW_DISTANCE ** 2
