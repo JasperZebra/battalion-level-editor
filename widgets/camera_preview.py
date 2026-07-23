@@ -431,16 +431,23 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             glDisable(GL_CULL_FACE)  # dome faces point inward
             glDepthMask(GL_FALSE)
             glColor4f(1.0, 1.0, 1.0, 1.0)
+            glDisable(GL_DEPTH_TEST)  # a skybox is never depth-culled
             import numpy
             size, up, horizon = self._sky_params
-            mtx = numpy.array([size, 0, 0, 0,  0, size * up, 0, 0,  0, 0, size, 0,
-                               campos[0], horizon, campos[2], 1], dtype=numpy.float32)
+            model = lv.bwmodelhandler.models[self._sky_name]
+            radius = max(getattr(model, "boundsphereradius", 35.0), 0.001)
+            # Scale from the measured bound sphere so the dome always fits
+            # inside the far plane regardless of the level's units.
+            s = 3200.0 / radius
+            mtx = numpy.array([s, 0, 0, 0,  0, s * up, 0, 0,  0, 0, s, 0,
+                               campos[0], campos[1], campos[2], 1], dtype=numpy.float32)
             lv.bwmodelhandler.rendermodel(self._sky_name, mtx, None, 0)
         except Exception:
             if not getattr(self, "_sky_error", False):
                 self._sky_error = True
                 traceback.print_exc()
         finally:
+            glEnable(GL_DEPTH_TEST)
             glDepthMask(GL_TRUE)
             glEnable(GL_ALPHA_TEST)
             glDisable(GL_TEXTURE_2D)
