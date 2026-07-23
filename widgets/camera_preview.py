@@ -1279,14 +1279,15 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
             pw, ph = int(64 * sx), int(80 * sy)
-            # Portrait center (555,89) => (404.5,51.5) relative to box origin.
-            painter.drawPixmap(int(404.5 * sx - pw / 2), int(51.5 * sy - ph / 2),
+            # Portrait center (555,89) => (404.5,51.5) relative to box origin;
+            # nudged slightly left to sit centered in the frame window.
+            painter.drawPixmap(int(396.0 * sx - pw / 2), int(51.5 * sy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
         # White for the player's army, yellow for the enemy (mEnemyTextColour).
         painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
                        else QtGui.QColor(255, 255, 0))
         font = QtGui.QFont()
-        font.setPixelSize(max(int(11 * sy), 8))
+        font.setPixelSize(max(int(14 * sy), 9))
         font.setBold(True)
         painter.setFont(font)
         # Game text rect (screen 183..492 x, 48..126 y) relative to box origin.
