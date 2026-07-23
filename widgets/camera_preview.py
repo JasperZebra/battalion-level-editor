@@ -443,6 +443,8 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             glEnable(GL_TEXTURE_2D)
             glDisable(GL_ALPHA_TEST)
             glDisable(GL_CULL_FACE)  # dome faces point inward
+            glEnable(GL_BLEND)       # sky textures (e.g. rainbows) use alpha
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
             glDepthMask(GL_FALSE)
             glColor4f(1.0, 1.0, 1.0, 1.0)
             glDisable(GL_DEPTH_TEST)  # a skybox is never depth-culled
@@ -461,6 +463,7 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
                 self._sky_error = True
                 traceback.print_exc()
         finally:
+            glDisable(GL_BLEND)
             glEnable(GL_DEPTH_TEST)
             glDepthMask(GL_TRUE)
             glEnable(GL_ALPHA_TEST)
@@ -493,8 +496,10 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
     def _render_objects(self, lv, campos):
         glEnable(GL_TEXTURE_2D)
         glEnable(GL_ALPHA_TEST)
-        glAlphaFunc(GL_GEQUAL, 0.5)
-        glDisable(GL_BLEND)
+        glAlphaFunc(GL_GEQUAL, 0.1)
+        # Blend so semi-transparent texels render clear instead of black.
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glColor4f(1.0, 1.0, 1.0, 1.0)
         handler = lv.bwmodelhandler
         overrides = self.owner.unit_overrides()
