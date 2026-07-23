@@ -87,6 +87,7 @@ class LevelEditor(QMainWindow):
             self.configuration = make_default_config()
 
         self.level_file = None
+        self.preload_file = None
         self.plugin_handler = PluginHandler()
         self.hotreload_timer = QtCore.QTimer()
         self.hotreload_timer.setInterval(1000)
@@ -380,6 +381,8 @@ class LevelEditor(QMainWindow):
             self.tree_select_object(current[0])
 
     def tree_search_action(self, text):
+        if self.level_file is None:
+            return
         txt = text.lower().strip()
 
         def search_func(obj):
