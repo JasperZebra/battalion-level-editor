@@ -1672,7 +1672,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         h = int(97 * sy)
         # Full 80x80 disc texture drawn square (ring content dia ~77 of 80).
         disc_w, disc_h = int(76 * sx), int(76 * sy)
-        disc_cx = (w - 75 * sx) if enemy else 75 * sx
+        disc_cx = (w - 95 * sx) if enemy else 95 * sx
         disc_cy = 56 * sy
         bar_h = int(64 * sy)      # native texture height, centered on the disc
         bar_y = int(disc_cy - bar_h / 2)
@@ -1686,7 +1686,9 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         # texture alpha is ~0.4 but the in-game bar reads closer to ~0.65.
         mid = self.phone_texture("CO_DIALOGUE_mid")
         cap = self.phone_texture("CO_DIALOG_rt")
-        tuck = int(disc_cx + 25.5 * sx) if not enemy else int(disc_cx - 25.5 * sx)
+        # The bar is FIXED - it does not follow the medallion. Its hidden end
+        # sits at 66.5 (where the disc tucked over it in the original layout).
+        tuck = int(66.5 * sx) if not enemy else int(w - 66.5 * sx)
         bar = QtGui.QPixmap(max(w, 1), max(h, 1))
         bar.fill(QtCore.Qt.GlobalColor.transparent)
         bp = QtGui.QPainter(bar)
