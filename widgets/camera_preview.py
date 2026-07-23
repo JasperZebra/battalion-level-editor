@@ -1663,14 +1663,15 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         sx = self.glview.width() / 640.0
         sy = self.glview.height() / 480.0
         w = int(500 * sx)
-        h = int(80 * sy)          # canvas: 74-tall box + a little headroom
-        box_y = int(3 * sy)
-        box_h = int(74 * sy)
+        h = int(88 * sy)
+        # Medallion drawn slightly larger than its authored 69x74 crop so the
+        # CO head stays inside the ring; everything hangs off its center.
+        disc_w, disc_h = int(76 * sx), int(81 * sy)
+        disc_cx = (w - 38 * sx) if enemy else 38 * sx
+        disc_cy = 44 * sy
         bar_h = int(64 * sy)      # native texture height, centered on the disc
-        bar_y = box_y + (box_h - bar_h) // 2
-        disc_w = int(69 * sx)
+        bar_y = int(disc_cy - bar_h / 2)
         cap_w = int(16 * sx)
-        disc_x = (w - disc_w) if enemy else 0
         sm = QtCore.Qt.TransformationMode.SmoothTransformation
         out = QtGui.QPixmap(max(w, 1), max(h, 1))
         out.fill(QtCore.Qt.GlobalColor.transparent)
@@ -1680,6 +1681,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         # texture alpha is ~0.4 but the in-game bar reads closer to ~0.65.
         mid = self.phone_texture("CO_DIALOGUE_mid")
         cap = self.phone_texture("CO_DIALOG_rt")
+        tuck = int(disc_cx + 25.5 * sx) if not enemy else int(disc_cx - 25.5 * sx)
         bar = QtGui.QPixmap(max(w, 1), max(h, 1))
         bar.fill(QtCore.Qt.GlobalColor.transparent)
         bp = QtGui.QPainter(bar)
@@ -1689,32 +1691,35 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                               .scaled(cap_w, bar_h, transformMode=sm))
             if mid is not None and not mid.isNull():
                 bp.drawPixmap(cap_w, bar_y, mid.scaled(
-                    max(w - int(60 * sx) - cap_w, 1), bar_h, transformMode=sm))
+                    max(tuck - cap_w, 1), bar_h, transformMode=sm))
         else:
             if mid is not None and not mid.isNull():
-                bp.drawPixmap(int(60 * sx), bar_y, mid.scaled(
-                    max(w - int(60 * sx) - cap_w, 1), bar_h, transformMode=sm))
+                bp.drawPixmap(tuck, bar_y, mid.scaled(
+                    max(w - tuck - cap_w, 1), bar_h, transformMode=sm))
             if cap is not None and not cap.isNull():
                 bp.drawPixmap(w - cap_w, bar_y, cap.scaled(cap_w, bar_h, transformMode=sm))
         bp.end()
         painter.drawPixmap(0, 0, bar)
         painter.drawPixmap(0, 0, bar)
-        painter.drawPixmap(disc_x, box_y, disc.copy(0, 0, 69, 74).scaled(
-            disc_w, box_h, transformMode=sm))
+        # Layering per the game: ring (disc + glass) ABOVE the bar, CO head
+        # ABOVE the ring.
+        disc_pos = (int(disc_cx - disc_w / 2), int(disc_cy - disc_h / 2))
+        painter.drawPixmap(*disc_pos, disc.copy(0, 0, 69, 74).scaled(
+            disc_w, disc_h, transformMode=sm))
+        hi = self.phone_texture("CO_DIALOG_lft_hi")
+        if hi is not None and not hi.isNull():
+            painter.drawPixmap(*disc_pos, hi.copy(0, 0, 69, 74).scaled(
+                disc_w, disc_h, transformMode=sm))
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            # Inside the ring, facing the text: the source art faces slightly
-            # left, so the friendly (left-side) portrait is mirrored.
+            # Topmost, facing the text (source art faces slightly left, so the
+            # friendly left-side portrait is mirrored), nudged 0.75 right.
             pw, ph = int(52 * sx), int(65 * sy)
             if not enemy:
                 portrait = portrait.transformed(QtGui.QTransform().scale(-1, 1))
-            painter.drawPixmap(int(disc_x + 34.5 * sx - pw / 2),
-                               int((3 + 36) * sy - ph / 2),
+            painter.drawPixmap(int(disc_cx + 0.75 * sx - pw / 2),
+                               int(disc_cy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
-        hi = self.phone_texture("CO_DIALOG_lft_hi")
-        if hi is not None and not hi.isNull():
-            painter.drawPixmap(disc_x, box_y, hi.copy(0, 0, 69, 74).scaled(
-                disc_w, box_h, transformMode=sm))
         # Lightning flip-book (CODIALOGUEflash, 3x3 sheet, 7 frames) blinking
         # at the medallion's outer top rim while the message opens.
         flash = self.phone_texture("CODIALOGUEflash")
@@ -1723,18 +1728,18 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             fx, fy = spark_frame % 3, spark_frame // 3
             cell = flash.copy(fx * cw, fy * ch, cw, ch).scaled(
                 int(cw * 3 * sx), int(ch * 3 * sy), transformMode=sm)
-            flash_x = (disc_x + int(7 * sx)) if enemy else (disc_x + int(62 * sx))
+            flash_x = disc_cx + (-30 * sx if enemy else 30 * sx)
             painter.drawPixmap(int(flash_x - cell.width() / 2),
-                               int(12 * sy - cell.height() / 2), cell)
+                               int(disc_cy - 30 * sy - cell.height() / 2), cell)
         # White text with a dark outline, like the game's comic lettering.
         font = QtGui.QFont()
         font.setPixelSize(max(int(14 * sy), 9))
         font.setBold(True)
         painter.setFont(font)
         if enemy:
-            rect = QtCore.QRect(int(24 * sx), bar_y, w - int((24 + 85) * sx), bar_h)
+            rect = QtCore.QRect(int(24 * sx), bar_y, w - int((24 + 88) * sx), bar_h)
         else:
-            rect = QtCore.QRect(int(81 * sx), bar_y, w - int((81 + 24) * sx), bar_h)
+            rect = QtCore.QRect(int(88 * sx), bar_y, w - int((88 + 24) * sx), bar_h)
         flags = (int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                  | Qt.TextFlag.TextWordWrap)
         painter.setPen(QtGui.QColor(45, 45, 45))
