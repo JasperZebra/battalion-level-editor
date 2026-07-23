@@ -1293,11 +1293,18 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             painter.drawPixmap(int(401.0 * sx - pw / 2), int(51.5 * sy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
         painter.drawPixmap(0, 0, frame)
-        # CO_DIALOGUE_02: the glass pane that covers the portrait window.
+        # CO_DIALOGUE_02: the glass/highlight overlay, mapped over the whole
+        # box with the same three-crop layout as the frame atlas.
         glass = self.phone_texture("CO_DIALOGUE_02")
         if glass is not None and not glass.isNull():
+            g_left = glass.copy(0, 2, 29, 97).scaled(left.width(), left.height(),
+                                                     transformMode=sm)
+            g_mid = glass.copy(32, 2, 28, 97).scaled(middle.width(), middle.height(),
+                                                     transformMode=sm)
             g_right = glass.copy(63, 2, 128, 146).scaled(right.width(), right.height(),
                                                          transformMode=sm)
+            painter.drawPixmap(0, 0, g_left)
+            painter.drawPixmap(left.width(), 0, g_mid)
             painter.drawPixmap(w - right.width(), 0, g_right)
         # White for the player's army, yellow for the enemy (mEnemyTextColour).
         painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
