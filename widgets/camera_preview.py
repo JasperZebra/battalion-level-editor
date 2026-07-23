@@ -1262,16 +1262,20 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         painter.drawPixmap(0, 0, left)
         painter.drawPixmap(left.width(), 0, middle)
         painter.drawPixmap(w - right.width(), 0, right)
-        # Faction tint: multiply the box frame by the army colour, keeping alpha.
+        # Faction tint: multiply the whole box by the army colour, then mask by
+        # the box's own alpha so transparent regions stay transparent.
         tint = self.ARMY_TINTS.get(army)
         if tint is not None:
-            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
-            painter.fillRect(0, 0, w, h, QtGui.QColor(*tint))
-            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
-            painter.drawPixmap(0, 0, left)
-            painter.drawPixmap(left.width(), 0, middle)
-            painter.drawPixmap(w - right.width(), 0, right)
-            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.end()
+            tinted = QtGui.QPixmap(out)
+            mask_painter = QtGui.QPainter(tinted)
+            mask_painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
+            mask_painter.fillRect(0, 0, w, h, QtGui.QColor(*tint))
+            mask_painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
+            mask_painter.drawPixmap(0, 0, out)
+            mask_painter.end()
+            out = tinted
+            painter = QtGui.QPainter(out)
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
             pw, ph = int(64 * sx), int(80 * sy)
