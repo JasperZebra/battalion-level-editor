@@ -417,7 +417,12 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             glDisable(GL_CULL_FACE)  # dome faces point inward
             glDepthMask(GL_FALSE)
             glColor4f(1.0, 1.0, 1.0, 1.0)
-            mtx = _facing_matrix((campos[0], campos[1], campos[2]), (0.0, 1.0))
+            import numpy
+            model = lv.bwmodelhandler.models[self._sky_name]
+            radius = max(getattr(model, "boundsphereradius", 300.0), 1.0)
+            s = 3500.0 / radius  # native dome is tiny (~300u); span the far plane
+            mtx = numpy.array([s, 0, 0, 0,  0, s, 0, 0,  0, 0, s, 0,
+                               campos[0], campos[1], campos[2], 1], dtype=numpy.float32)
             lv.bwmodelhandler.rendermodel(self._sky_name, mtx, None, 0)
         except Exception:
             if not getattr(self, "_sky_error", False):
@@ -1182,7 +1187,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         done = getattr(self, "_phone_tex_done", None)
         if done is None:
             done = self._phone_tex_done = set()
-        names = ["CO_DIALOGUE_01"]
+        names = ["CO_DIALOGUE_01", "CO_DIALOGUE_02"]
         if self._active_cutscene is not None:
             for entry in self._active_cutscene.messages:
                 tex = self.sprite_texture_name(entry[3])
@@ -1287,6 +1292,13 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             # Portrait center (555,89) => (404.5,51.5) relative to box origin.
             painter.drawPixmap(int(404.5 * sx - pw / 2), int(51.5 * sy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
+        painter.drawPixmap(0, 0, frame)
+        # CO_DIALOGUE_02: the glass pane that covers the portrait window.
+        glass = self.phone_texture("CO_DIALOGUE_02")
+        if glass is not None and not glass.isNull():
+            g_right = glass.copy(63, 2, 128, 146).scaled(right.width(), right.height(),
+                                                         transformMode=sm)
+            painter.drawPixmap(w - right.width(), 0, g_right)
         # White for the player's army, yellow for the enemy (mEnemyTextColour).
         painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
                        else QtGui.QColor(255, 255, 0))
@@ -1299,8 +1311,6 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                                       int(309 * sx), int(78 * sy)),
                          int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                          | Qt.TextFlag.TextWordWrap, text)
-        # Glass frame on top of everything, text included (in-game sheen).
-        painter.drawPixmap(0, 0, frame)
         painter.end()
         return out
 
