@@ -1748,9 +1748,9 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         font.setBold(True)
         painter.setFont(font)
         if enemy:
-            rect = QtCore.QRect(int(20 * sx), bar_y, w - int((20 + 155) * sx), bar_h)
+            rect = QtCore.QRect(int(20 * sx), bar_y, w - int((20 + 121) * sx), bar_h)
         else:
-            rect = QtCore.QRect(int(155 * sx), bar_y, w - int((155 + 20) * sx), bar_h)
+            rect = QtCore.QRect(int(121 * sx), bar_y, w - int((121 + 20) * sx), bar_h)
         flags = (int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                  | Qt.TextFlag.TextWordWrap)
         painter.setPen(QtGui.QColor(45, 45, 45))
