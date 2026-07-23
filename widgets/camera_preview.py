@@ -1663,12 +1663,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         sx = self.glview.width() / 640.0
         sy = self.glview.height() / 480.0
         w = int(500 * sx)
-        h = int(82 * sy)
-        # Medallion at its authored 69x74 crop size; everything hangs off its
-        # center, with margin so nothing clips at the canvas edges.
-        disc_w, disc_h = int(69 * sx), int(74 * sy)
-        disc_cx = (w - 37 * sx) if enemy else 37 * sx
-        disc_cy = 41 * sy
+        h = int(94 * sy)
+        # Medallion enlarged beyond its authored 69x74 crop so the full-size
+        # CO head drawn above it stays framed inside the ring.
+        disc_w, disc_h = int(80 * sx), int(86 * sy)
+        disc_cx = (w - 41 * sx) if enemy else 41 * sx
+        disc_cy = 47 * sy
         bar_h = int(64 * sy)      # native texture height, centered on the disc
         bar_y = int(disc_cy - bar_h / 2)
         cap_w = int(16 * sx)
@@ -1709,21 +1709,16 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             disc_w, disc_h, transformMode=sm))
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            # Topmost and large, but clipped to the ring's inner circle so the
-            # head never escapes the medallion. Facing the text (source art
-            # faces slightly left, so the friendly left-side portrait is
-            # mirrored), nudged 0.75 right.
+            # The CO head is its own layer drawn ABOVE the ring - no clipping;
+            # the enlarged ring frames it. Facing the text (source art faces
+            # slightly left, so the friendly left-side portrait is mirrored),
+            # nudged 0.75 right.
             pw, ph = int(62 * sx), int(77 * sy)
             if not enemy:
                 portrait = portrait.transformed(QtGui.QTransform().scale(-1, 1))
-            painter.save()
-            clip = QtGui.QPainterPath()
-            clip.addEllipse(QtCore.QPointF(disc_cx, disc_cy), 30.5 * sx, 33.0 * sy)
-            painter.setClipPath(clip)
             painter.drawPixmap(int(disc_cx + 0.75 * sx - pw / 2),
                                int(disc_cy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
-            painter.restore()
         # Lightning flip-book (CODIALOGUEflash, 3x3 sheet, 7 frames) blinking
         # at the medallion's outer top rim while the message opens.
         flash = self.phone_texture("CODIALOGUEflash")
