@@ -219,18 +219,49 @@ class CutsceneTimeline(object):
     RE_SPAWN = re.compile(r"\bSpawn\(\s*([\w.]+)\s*\)")
     RE_DESPAWN = re.compile(r"\bDespawn\(\s*([\w.]+)\s*\)")
     RE_KILL = re.compile(r"\bKill\(\s*([\w.]+)\s*\)")
+    # Landing coordinates are literals or GetObjectX/ZPosition(Waypoint.Name) -
+    # the waypoint name is statically present, so both resolve at parse time.
+    _COORD = r"(-?[0-9.]+|GetObject[XZ]Position\(\s*[\w.]+\s*\))"
+    RE_LANDAIR = re.compile(r"\bLandAirUnit\(\s*([\w.]+)\s*,\s*" + _COORD
+                            + r"\s*,\s*" + _COORD
+                            + r"(?:\s*,\s*[\w.]+\s*,\s*[\w.]+\s*,\s*([0-9.]+))?")
+    RE_BEACH = re.compile(r"\bBeachWaterUnit\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
+    RE_COORDWP = re.compile(r"GetObject[XZ]Position\(\s*([\w.]+)\s*\)")
+    RE_ENTERVEH = re.compile(r"\bEnterVehicle\(\s*([\w.]+)\s*,\s*([\w.]+)")
+    RE_PUTIN = re.compile(r"\bPutUnitInVehicle\(\s*([\w.]+)\s*,\s*([\w.]+)")
+    RE_EXITVEH = re.compile(r"\bExitVehicle\(\s*([\w.]+)\s*,\s*([\w.]+)")
     GOTO_SPEED = 10.0
 
     RE_BLOCK_OPEN = re.compile(r"\b(?:if\b.*\bthen|while\b.*\bdo|for\b.*\bdo|function\b)")
     RE_BLOCK_CLOSE = re.compile(r"^\s*end\b")
 
-    def __init__(self, name, text, resolve):
+    def __init__(self, name, text, resolve, owner=None):
         self.name = name
+        base_resolve = resolve
+
+        def resolve(token):
+            # In unit-attached scripts (mpScript), "owner" is the unit itself.
+            return owner if token == "owner" else base_resolve(token)
+
+        def coord(expr):
+            m = self.RE_COORDWP.search(expr)
+            if m is None:
+                try:
+                    return float(expr)
+                except ValueError:
+                    return None
+            obj = resolve(m.group(1))
+            pos = _obj_pos(obj) if obj is not None else None
+            if pos is None:
+                return None
+            return pos[0] if "XPosition" in expr else pos[2]
+
         self.events = []   # (time, kind, data)
         self.fades = []    # (time, direction, duration)
         self.follows = []  # (time, unit_obj, "wp"|"area", wp_obj_or_xz, speed, conditional)
         self.kills = []    # (time, obj, conditional)
         self.spawns = []   # (time, obj, visible, conditional) - Spawn/Despawn
+        self.vehicle_ops = []  # (time, "put"|"enter"|"exit", unit_or_None, veh_or_None, conditional)
         self.messages = []  # (start, msgid, duration, sprite, army) - queued popups
         self._msg_clears = []
         self.camera_first_time = {}  # camera obj -> earliest time it becomes active
@@ -318,6 +349,37 @@ class CutsceneTimeline(object):
                 unit, tgt = resolve(m.group(1)), resolve(m.group(2))
                 if unit is not None and tgt is not None:
                     self.follows.append((clock, unit, "unit", tgt, 7.0, conditional))
+            m = self.RE_LANDAIR.search(line)
+            if m is not None:
+                unit = resolve(m.group(1))
+                x, z = coord(m.group(2)), coord(m.group(3))
+                if unit is not None and x is not None and z is not None:
+                    speed = float(m.group(4)) if m.group(4) else 10.0
+                    self.follows.append((clock, unit, "land", (x, z), speed, conditional))
+            m = self.RE_BEACH.search(line)
+            if m is not None:
+                unit = resolve(m.group(1))
+                if unit is not None:
+                    dest = (float(m.group(2)), float(m.group(3)))
+                    self.follows.append((clock, unit, "land", dest, self.GOTO_SPEED, conditional))
+            m = self.RE_PUTIN.search(line)
+            if m is not None:
+                unit, veh = resolve(m.group(1)), resolve(m.group(2))
+                if unit is not None and veh is not None:
+                    self.vehicle_ops.append((clock, "put", unit, veh, conditional))
+            m = self.RE_ENTERVEH.search(line)
+            if m is not None:
+                unit, veh = resolve(m.group(1)), resolve(m.group(2))
+                if unit is not None and veh is not None:
+                    self.vehicle_ops.append((clock, "enter", unit, veh, conditional))
+            m = self.RE_EXITVEH.search(line)
+            if m is not None:
+                # constant.ID_NONE as the unit = every passenger exits; as the
+                # vehicle = the unit exits whatever it is currently inside.
+                unit = None if m.group(1) == "constant.ID_NONE" else resolve(m.group(1))
+                veh = None if m.group(2) == "constant.ID_NONE" else resolve(m.group(2))
+                if unit is not None or veh is not None:
+                    self.vehicle_ops.append((clock, "exit", unit, veh, conditional))
             m = self.RE_PHONE.search(line)
             if m is not None:
                 dur = float(m.group(3))
@@ -822,6 +884,14 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         def resolve(name):
             return name_to_obj.get(name)
 
+        # Unit-attached scripts (mpScript -> cGameScriptResource) refer to
+        # their unit as "owner"; map script name -> owning object.
+        script_owner = {}
+        for obj in level.objects.values():
+            script = getattr(obj, "mpScript", None)
+            if script is not None and getattr(script, "mName", None):
+                script_owner.setdefault(script.mName, obj)
+
         cutscenes = []
         self._all_timelines = []
         try:
@@ -837,8 +907,9 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             # Every script is parsed: non-camera scripts still contribute
             # background unit movement to cutscene playback (the game runs
             # all scripts concurrently from level start).
+            scriptname = os.path.splitext(os.path.basename(path))[0]
             timeline = CutsceneTimeline(
-                os.path.splitext(os.path.basename(path))[0], text, resolve)
+                scriptname, text, resolve, script_owner.get(scriptname))
             self._all_timelines.append(timeline)
             if timeline.valid:
                 cutscenes.append(timeline)
@@ -1050,19 +1121,26 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         level script (all scripts start together at level load in-game)."""
         follows = [entry[:5] for entry in self._active_cutscene.follows]
         kills = [entry[:2] for entry in self._active_cutscene.kills]
+        # Vehicle ops enter the same stream as pseudo-follows so boarding,
+        # disembarking and movement are processed in one chronological pass.
+        follows.extend((t, unit, op, veh, 0.0)
+                       for t, op, unit, veh, cond in self._active_cutscene.vehicle_ops)
         for timeline in self._all_timelines:
             if timeline is self._active_cutscene:
                 continue
             follows.extend(entry[:5] for entry in timeline.follows if not entry[5])
+            follows.extend((t, unit, op, veh, 0.0)
+                           for t, op, unit, veh, cond in timeline.vehicle_ops if not cond)
             kills.extend(entry[:2] for entry in timeline.kills if not entry[2])
         follows.sort(key=lambda entry: entry[0])
         kills.sort(key=lambda entry: entry[0])
         return follows, kills
 
     def build_unit_routes(self):
-        """Turn the scripted movement calls (FollowWaypoint, GoToArea) into
-        per-unit routes. A later order for the same unit starts where the
-        previous route put the unit at that moment."""
+        """Turn the scripted movement calls (FollowWaypoint, GoToArea, Teleport,
+        LandAirUnit/BeachWaterUnit and the vehicle boarding ops) into per-unit
+        routes. A later order for the same unit starts where the previous route
+        put the unit at that moment."""
         self._unit_routes = {}
         follows, self._merged_kills = self.gather_movement()
         # Dialogue comes from the cutscene's own script only (verified in-game:
@@ -1072,11 +1150,76 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         for timeline in self._all_timelines:
             if timeline is not self._active_cutscene:
                 spawns.extend(e[:3] for e in timeline.spawns if not e[3])
-        spawns.sort(key=lambda e: e[0])
-        self._merged_spawns = spawns
-        self._spawn_actor_ids = set(obj.id for t, obj, vis in spawns)
         bwterrain = self.editor.level_view.bwterrain
+
+        def pos_at(obj, t):
+            active = None
+            for route in self._unit_routes.get(obj.id, ()):
+                if route.start_time <= t:
+                    active = route
+            return active.sample(t)[0] if active is not None else _obj_pos(obj)
+
+        # Units listed in a vehicle's mPassenger array start the level inside
+        # it: hidden until an ExitVehicle puts them on the ground.
+        passengers = {}   # vehicle id -> [unit objs], boarding order
+        in_vehicle = {}   # unit id -> vehicle obj
+        extra_spawns = []
+        if self.editor.level_file is not None:
+            for obj in self.editor.level_file.objects.values():
+                for passenger in getattr(obj, "mPassenger", None) or ():
+                    if passenger is not None:
+                        passengers.setdefault(obj.id, []).append(passenger)
+                        in_vehicle[passenger.id] = obj
+                        extra_spawns.append((0.0, passenger, False))
+        exit_count = {}   # vehicle id -> how many already stepped out
         for time, unit, kind, data, speed in follows:
+            if kind in ("put", "enter", "exit"):
+                veh = data
+                if kind == "put":
+                    in_vehicle[unit.id] = veh
+                    passengers.setdefault(veh.id, []).append(unit)
+                    extra_spawns.append((time, unit, False))
+                    continue
+                if kind == "enter":
+                    start_pos, vpos = pos_at(unit, time), pos_at(veh, time)
+                    if start_pos is None or vpos is None:
+                        continue
+                    route = UnitRoute(time, start_pos, [vpos], 7.0)
+                    self._unit_routes.setdefault(unit.id, []).append(route)
+                    in_vehicle[unit.id] = veh
+                    passengers.setdefault(veh.id, []).append(unit)
+                    extra_spawns.append((time + route.total / route.speed, unit, False))
+                    continue
+                if unit is not None:
+                    targets = [unit]
+                    veh = veh if veh is not None else in_vehicle.get(unit.id)
+                else:
+                    targets = list(passengers.get(veh.id, ()))
+                vpos = pos_at(veh, time) if veh is not None else None
+                for exiting in targets:
+                    base = vpos if vpos is not None else pos_at(exiting, time)
+                    if base is None:
+                        continue
+                    idx = exit_count.get(veh.id, 0) if veh is not None else 0
+                    if veh is not None:
+                        exit_count[veh.id] = idx + 1
+                    ang = math.radians(90.0 + idx * 45.0)
+                    radius = 4.0 + 2.0 * (idx // 8)
+                    x = base[0] + radius * math.sin(ang)
+                    z = base[2] + radius * math.cos(ang)
+                    y = base[1]
+                    if bwterrain is not None:
+                        terrain_y = bwterrain.check_height(x, z)
+                        if terrain_y is not None:
+                            y = terrain_y
+                    direction = (math.sin(ang), math.cos(ang))
+                    self._unit_routes.setdefault(exiting.id, []).append(
+                        UnitRoute(time, (x, y, z), [(x, y, z)], 1e9, direction))
+                    extra_spawns.append((time, exiting, True))
+                    in_vehicle.pop(exiting.id, None)
+                    if veh is not None and exiting in passengers.get(veh.id, ()):
+                        passengers[veh.id].remove(exiting)
+                continue
             objid = unit.id
             routes = self._unit_routes.setdefault(objid, [])
             if routes:
@@ -1106,6 +1249,16 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 else:
                     tpos = _obj_pos(data)
                     points = [tpos] if tpos is not None else []
+            elif kind == "land":
+                # LandAirUnit/BeachWaterUnit: touch down ON the terrain even
+                # for air/naval units (unlike GoToArea, which keeps altitude).
+                x, z = data
+                y = start_pos[1]
+                if bwterrain is not None:
+                    terrain_y = bwterrain.check_height(x, z)
+                    if terrain_y is not None:
+                        y = terrain_y
+                points = [(x, y, z)]
             else:
                 x, z = data
                 y = start_pos[1]
@@ -1117,6 +1270,10 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             if not points:
                 continue
             routes.append(UnitRoute(time, start_pos, points, speed, fixed_dir))
+        spawns.extend(extra_spawns)
+        spawns.sort(key=lambda e: e[0])
+        self._merged_spawns = spawns
+        self._spawn_actor_ids = set(obj.id for t, obj, vis in spawns)
 
     def unit_overrides(self):
         """objid -> (pos, direction) for scripted units at the current time."""
