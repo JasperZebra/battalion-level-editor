@@ -1264,14 +1264,17 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         fp.drawPixmap(0, 0, left)
         fp.drawPixmap(left.width(), 0, middle)
         fp.drawPixmap(w - right.width(), 0, right)
+        fp.end()
         tint = self.ARMY_TINTS.get(army)
         if tint is not None:
+            # Capture the untinted frame as the alpha mask BEFORE tinting.
+            mask = QtGui.QPixmap(frame)
+            fp = QtGui.QPainter(frame)
             fp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
             fp.fillRect(0, 0, w, h, QtGui.QColor(*tint))
             fp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
-            frame_copy = QtGui.QPixmap(frame)
-            fp.drawPixmap(0, 0, frame_copy)
-        fp.end()
+            fp.drawPixmap(0, 0, mask)
+            fp.end()
         # Final composite: portrait BEHIND the frame (the frame's glass area is
         # translucent and overlays the face, like in-game), then the frame, text.
         out = QtGui.QPixmap(max(w, 1), max(h, 1))
