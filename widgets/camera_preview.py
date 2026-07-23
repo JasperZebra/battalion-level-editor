@@ -1514,9 +1514,10 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         portrait_ok = (active is not None and
                        self.phone_texture(self.sprite_texture_name(active[3])) is not None)
         # Lightning: one 7-frame pass when the message opens, no loop. BW1's
-        # sheet plays at 10fps; BW2's widget declares frameTime 0.04s (25fps).
+        # sheet plays at 10fps; BW2's sprite declares frameTime 0.075s
+        # (13.3fps, SP_1.1 cPanelSprites mCOLightening).
         if active is not None:
-            fps = 25.0 if (self.editor.level_file is not None
+            fps = 13.3 if (self.editor.level_file is not None
                            and self.editor.level_file.bw2) else 10.0
             frame = int((self._t - active[0]) * fps)
             self._spark_frame = frame if 0 <= frame <= 6 else None
@@ -1648,13 +1649,18 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         return out
 
     def compose_phone_box_bw2(self, text, portrait_name, army=0, spark_frame=0):
-        """BW2's CO message, matched against in-game screenshots: a neutral
+        """BW2's CO message, measured off in-game SP_1.1 screenshots
+        (Pictures/Screenshots 2026-07-23 151544/151614/151629): a neutral
         translucent bar (same for every faction), the CO medallion on the LEFT
         for the player's army and on the RIGHT for enemy transmissions (bar
-        first, rounded cap on the outer end). Disc/glass use crop (0,0,69,74)
-        of their 80x80 textures; the bar keeps its native 64 height centered
-        on the 74-tall disc; the portrait sits inside the ring, facing the
-        text; text is white with a dark outline."""
+        first, rounded cap on the outer end). The disc texture is drawn WHOLE
+        (its sSpriteBasetype UVs are stale atlas coords; cropping at 69 slices
+        the ring), kept circular at 76x76. The CO head is drawn 1.2x the ring
+        diameter, bottom-aligned with the ring's bottom rim, unclipped - in
+        game Windsor's hat rises above the ring. The glass-shine arc
+        (CO_DIALOG_lft_hi) overlays the disc under the head. Text is white
+        with a dark outline, starting 80px right of the disc center per
+        cHUDVariables (mTextPos 105 vs mLeftSidePos 25)."""
         disc = self.phone_texture("CO_DIALOGUE_left")
         if disc is None or disc.isNull():
             return None
@@ -1663,12 +1669,11 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         sx = self.glview.width() / 640.0
         sy = self.glview.height() / 480.0
         w = int(500 * sx)
-        h = int(94 * sy)
-        # Medallion enlarged beyond its authored 69x74 crop so the full-size
-        # CO head drawn above it stays framed inside the ring.
-        disc_w, disc_h = int(80 * sx), int(86 * sy)
+        h = int(97 * sy)
+        # Full 80x80 disc texture drawn square (ring content dia ~77 of 80).
+        disc_w, disc_h = int(76 * sx), int(76 * sy)
         disc_cx = (w - 41 * sx) if enemy else 41 * sx
-        disc_cy = 47 * sy
+        disc_cy = 56 * sy
         bar_h = int(64 * sy)      # native texture height, centered on the disc
         bar_y = int(disc_cy - bar_h / 2)
         cap_w = int(16 * sx)
@@ -1701,44 +1706,51 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         bp.end()
         painter.drawPixmap(0, 0, bar)
         painter.drawPixmap(0, 0, bar)
-        # Layering: bar first, the ring ABOVE it, the CO head ABOVE the ring.
-        # (CO_DIALOG_lft_hi is the HIGHLIGHTED-state ring variant, not an
-        # overlay - drawing it on top of the normal ring is wrong.)
+        # Layering: bar first, the ring above it, the glass-shine arc on the
+        # ring, the CO head topmost (its hat/hair rises past the ring's top
+        # in-game; the bottom edge lands on the ring's bottom rim).
         disc_pos = (int(disc_cx - disc_w / 2), int(disc_cy - disc_h / 2))
-        painter.drawPixmap(*disc_pos, disc.copy(0, 0, 69, 74).scaled(
-            disc_w, disc_h, transformMode=sm))
+        painter.drawPixmap(*disc_pos, disc.scaled(disc_w, disc_h,
+                                                  transformMode=sm))
+        shine = self.phone_texture("CO_DIALOG_lft_hi")
+        if shine is not None and not shine.isNull():
+            painter.drawPixmap(*disc_pos, shine.scaled(disc_w, disc_h,
+                                                       transformMode=sm))
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            # The CO head is its own layer drawn ABOVE the ring - no clipping;
-            # the enlarged ring frames it. Facing the text (source art faces
-            # slightly left, so the friendly left-side portrait is mirrored),
-            # nudged 0.75 right.
-            pw, ph = int(62 * sx), int(77 * sy)
+            # 64x80 head at 1.2x the ring dia, facing the text (source art
+            # faces slightly left, so the friendly left-side head is mirrored).
+            ph = int(88 * sy)
+            pw = int(70.4 * sx)
             if not enemy:
                 portrait = portrait.transformed(QtGui.QTransform().scale(-1, 1))
-            painter.drawPixmap(int(disc_cx + 0.75 * sx - pw / 2),
-                               int(disc_cy - ph / 2),
+            painter.drawPixmap(int(disc_cx - pw / 2),
+                               int(disc_cy + 34 * sy) - ph,
                                portrait.scaled(pw, ph, transformMode=sm))
-        # Lightning flip-book (CODIALOGUEflash, 3x3 sheet, 7 frames) blinking
-        # at the medallion's outer top rim while the message opens.
+        # Lightning flip-book (CODIALOGUEflash 16x16, 3x3 sheet of ~5px cells,
+        # 7 frames) sparking at the medallion's outer top rim on message open.
+        # Authored mLighteningScale is 2.5 - the cells are tiny in-game too.
         flash = self.phone_texture("CODIALOGUEflash")
         if spark_frame is not None and flash is not None and not flash.isNull():
             cw, ch = flash.width() // 3, flash.height() // 3
             fx, fy = spark_frame % 3, spark_frame // 3
             cell = flash.copy(fx * cw, fy * ch, cw, ch).scaled(
-                int(cw * 3 * sx), int(ch * 3 * sy), transformMode=sm)
-            flash_x = disc_cx + (-30 * sx if enemy else 30 * sx)
+                max(int(cw * 2.5 * sx), 1), max(int(ch * 2.5 * sy), 1),
+                transformMode=sm)
+            flash_x = disc_cx + (-26 * sx if enemy else 26 * sx)
             painter.drawPixmap(int(flash_x - cell.width() / 2),
-                               int(disc_cy - 30 * sy - cell.height() / 2), cell)
-        # White text with a dark outline, like the game's comic lettering.
-        font = QtGui.QFont()
+                               int(disc_cy - 26 * sy - cell.height() / 2), cell)
+        # White text with a dark outline; the game letters in a hand-drawn
+        # comic font (Chisel), Comic Sans is the closest stock match. Starts
+        # 80px right of the disc center (mTextPos 105 - mLeftSidePos 25).
+        font = QtGui.QFont("Comic Sans MS")
         font.setPixelSize(max(int(14 * sy), 9))
         font.setBold(True)
         painter.setFont(font)
         if enemy:
-            rect = QtCore.QRect(int(24 * sx), bar_y, w - int((24 + 88) * sx), bar_h)
+            rect = QtCore.QRect(int(20 * sx), bar_y, w - int((20 + 121) * sx), bar_h)
         else:
-            rect = QtCore.QRect(int(88 * sx), bar_y, w - int((88 + 24) * sx), bar_h)
+            rect = QtCore.QRect(int(121 * sx), bar_y, w - int((121 + 20) * sx), bar_h)
         flags = (int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                  | Qt.TextFlag.TextWordWrap)
         painter.setPen(QtGui.QColor(45, 45, 45))
