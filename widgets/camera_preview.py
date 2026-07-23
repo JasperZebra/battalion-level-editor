@@ -414,13 +414,14 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         try:
             glEnable(GL_TEXTURE_2D)
             glDisable(GL_ALPHA_TEST)
+            glDisable(GL_CULL_FACE)  # dome faces point inward
             glDepthMask(GL_FALSE)
             glColor4f(1.0, 1.0, 1.0, 1.0)
             mtx = _facing_matrix((campos[0], campos[1], campos[2]), (0.0, 1.0))
             lv.bwmodelhandler.rendermodel(self._sky_name, mtx, None, 0)
         except Exception:
-            if not self._error_shown:
-                self._error_shown = True
+            if not getattr(self, "_sky_error", False):
+                self._sky_error = True
                 traceback.print_exc()
         finally:
             glDepthMask(GL_TRUE)
@@ -1221,9 +1222,9 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 if pixmap is not None:
                     self.msg_label.setStyleSheet("background: transparent;")
                     self.msg_label.setPixmap(pixmap)
-                    # Game layout: box spans x 23.5%..97.5%, top at 7.8% (of 640x480).
-                    self.msg_label.setGeometry(int(self.glview.width() * 0.235),
-                                               int(self.glview.height() * 0.078),
+                    # Game layout: box origin (150.5, 37.5) in 640x480 screen space.
+                    self.msg_label.setGeometry(int(self.glview.width() * 150.5 / 640.0),
+                                               int(self.glview.height() * 37.5 / 480.0),
                                                pixmap.width(), pixmap.height())
                 else:
                     self.msg_label.setStyleSheet(
@@ -1234,45 +1235,59 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     self.msg_label.setGeometry(6, 4, max(self.glview.width() - 12, 50), 52)
                 self.msg_label.show()
 
+    # Per-army HUD colours (cHUDVariables m*RadarColour): WF, XY, TU, SE, UW.
+    ARMY_TINTS = {0: (120, 170, 80), 1: (75, 110, 125), 2: (198, 50, 50),
+                  3: (245, 208, 80), 4: (144, 112, 144)}
+
     def compose_phone_box(self, text, portrait_name, army=0):
-        """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops:
-        left cap (0,2,29x97), stretch middle (32,2,60x97), right portrait
-        frame (63,2,128x146), portrait centered in the frame, text in the
-        game's text rect. Returns None if textures aren't cached yet."""
+        """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops,
+        mapped in 640x480 screen space per axis so proportions match the game
+        at any preview aspect. Returns None if textures aren't cached yet."""
         atlas = self.phone_texture("CO_DIALOGUE_01")
         if atlas is None or atlas.isNull():
             return None
-        scale = (self.glview.width() * 0.74) / 473.5
-        w = int(473.5 * scale)
-        h = int(146 * scale)
-        out = QtGui.QPixmap(w, h)
+        sx = self.glview.width() / 640.0
+        sy = self.glview.height() / 480.0
+        w = int(473.5 * sx)
+        h = int(146 * sy)
+        out = QtGui.QPixmap(max(w, 1), max(h, 1))
         out.fill(QtCore.Qt.GlobalColor.transparent)
         painter = QtGui.QPainter(out)
         sm = QtCore.Qt.TransformationMode.SmoothTransformation
-        left = atlas.copy(0, 2, 29, 97).scaled(int(29 * scale), int(97 * scale), transformMode=sm)
-        right = atlas.copy(63, 2, 128, 146).scaled(int(128 * scale), int(146 * scale), transformMode=sm)
+        left = atlas.copy(0, 2, 29, 97).scaled(int(29 * sx), int(97 * sy), transformMode=sm)
+        right = atlas.copy(63, 2, 128, 146).scaled(int(128 * sx), int(146 * sy), transformMode=sm)
         mid_w = w - left.width() - right.width()
         # Atlas rects are (x0,y0,x1,y1): middle strip is 32..60 = 28px wide.
         middle = atlas.copy(32, 2, 28, 97).scaled(max(mid_w, 1), left.height(), transformMode=sm)
         painter.drawPixmap(0, 0, left)
         painter.drawPixmap(left.width(), 0, middle)
         painter.drawPixmap(w - right.width(), 0, right)
+        # Faction tint: multiply the box frame by the army colour, keeping alpha.
+        tint = self.ARMY_TINTS.get(army)
+        if tint is not None:
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
+            painter.fillRect(0, 0, w, h, QtGui.QColor(*tint))
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
+            painter.drawPixmap(0, 0, left)
+            painter.drawPixmap(left.width(), 0, middle)
+            painter.drawPixmap(w - right.width(), 0, right)
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            pw, ph = int(64 * scale), int(80 * scale)
+            pw, ph = int(64 * sx), int(80 * sy)
             # Portrait center (555,89) => (404.5,51.5) relative to box origin.
-            painter.drawPixmap(int(404.5 * scale - pw / 2), int(51.5 * scale - ph / 2),
+            painter.drawPixmap(int(404.5 * sx - pw / 2), int(51.5 * sy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
         # White for the player's army, yellow for the enemy (mEnemyTextColour).
         painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
                        else QtGui.QColor(255, 255, 0))
         font = QtGui.QFont()
-        font.setPixelSize(max(int(11 * scale), 8))
+        font.setPixelSize(max(int(11 * sy), 8))
         font.setBold(True)
         painter.setFont(font)
         # Game text rect (screen 183..492 x, 48..126 y) relative to box origin.
-        painter.drawText(QtCore.QRect(int(32.5 * scale), int(10.5 * scale),
-                                      int(309 * scale), int(78 * scale)),
+        painter.drawText(QtCore.QRect(int(32.5 * sx), int(10.5 * sy),
+                                      int(309 * sx), int(78 * sy)),
                          int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                          | Qt.TextFlag.TextWordWrap, text)
         painter.end()
