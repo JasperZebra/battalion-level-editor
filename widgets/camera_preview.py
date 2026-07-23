@@ -1250,38 +1250,40 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         sy = self.glview.height() / 480.0
         w = int(473.5 * sx)
         h = int(146 * sy)
-        out = QtGui.QPixmap(max(w, 1), max(h, 1))
-        out.fill(QtCore.Qt.GlobalColor.transparent)
-        painter = QtGui.QPainter(out)
         sm = QtCore.Qt.TransformationMode.SmoothTransformation
+        # Frame layer: left cap + stretched middle + portrait frame, tinted by
+        # the army colour (masked by its own alpha so nothing bleeds).
+        frame = QtGui.QPixmap(max(w, 1), max(h, 1))
+        frame.fill(QtCore.Qt.GlobalColor.transparent)
+        fp = QtGui.QPainter(frame)
         left = atlas.copy(0, 2, 29, 97).scaled(int(29 * sx), int(97 * sy), transformMode=sm)
         right = atlas.copy(63, 2, 128, 146).scaled(int(128 * sx), int(146 * sy), transformMode=sm)
         mid_w = w - left.width() - right.width()
         # Atlas rects are (x0,y0,x1,y1): middle strip is 32..60 = 28px wide.
         middle = atlas.copy(32, 2, 28, 97).scaled(max(mid_w, 1), left.height(), transformMode=sm)
-        painter.drawPixmap(0, 0, left)
-        painter.drawPixmap(left.width(), 0, middle)
-        painter.drawPixmap(w - right.width(), 0, right)
-        # Faction tint: multiply the whole box by the army colour, then mask by
-        # the box's own alpha so transparent regions stay transparent.
+        fp.drawPixmap(0, 0, left)
+        fp.drawPixmap(left.width(), 0, middle)
+        fp.drawPixmap(w - right.width(), 0, right)
         tint = self.ARMY_TINTS.get(army)
         if tint is not None:
-            painter.end()
-            tinted = QtGui.QPixmap(out)
-            mask_painter = QtGui.QPainter(tinted)
-            mask_painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
-            mask_painter.fillRect(0, 0, w, h, QtGui.QColor(*tint))
-            mask_painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
-            mask_painter.drawPixmap(0, 0, out)
-            mask_painter.end()
-            out = tinted
-            painter = QtGui.QPainter(out)
+            fp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
+            fp.fillRect(0, 0, w, h, QtGui.QColor(*tint))
+            fp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
+            frame_copy = QtGui.QPixmap(frame)
+            fp.drawPixmap(0, 0, frame_copy)
+        fp.end()
+        # Final composite: portrait BEHIND the frame (the frame's glass area is
+        # translucent and overlays the face, like in-game), then the frame, text.
+        out = QtGui.QPixmap(max(w, 1), max(h, 1))
+        out.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(out)
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
             pw, ph = int(64 * sx), int(80 * sy)
             # Portrait center (555,89) => (404.5,51.5) relative to box origin.
             painter.drawPixmap(int(404.5 * sx - pw / 2), int(51.5 * sy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
+        painter.drawPixmap(0, 0, frame)
         # White for the player's army, yellow for the enemy (mEnemyTextColour).
         painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
                        else QtGui.QColor(255, 255, 0))
