@@ -1234,6 +1234,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     self.msg_label.setText(self.message_text(active[1]))
                     self.msg_label.setGeometry(6, 4, max(self.glview.width() - 12, 50), 52)
                 self.msg_label.show()
+                self.msg_label.raise_()  # text/box always on top of the preview
 
     # Per-army HUD colours (cHUDVariables m*RadarColour): WF, XY, TU, SE, UW.
     ARMY_TINTS = {0: (120, 170, 80), 1: (75, 110, 125), 2: (198, 50, 50),
@@ -1286,7 +1287,6 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             # Portrait center (555,89) => (404.5,51.5) relative to box origin.
             painter.drawPixmap(int(404.5 * sx - pw / 2), int(51.5 * sy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
-        painter.drawPixmap(0, 0, frame)
         # White for the player's army, yellow for the enemy (mEnemyTextColour).
         painter.setPen(QtGui.QColor(255, 255, 255) if army == 0
                        else QtGui.QColor(255, 255, 0))
@@ -1299,6 +1299,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                                       int(309 * sx), int(78 * sy)),
                          int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                          | Qt.TextFlag.TextWordWrap, text)
+        # Glass frame on top of everything, text included (in-game sheen).
+        painter.drawPixmap(0, 0, frame)
         painter.end()
         return out
 
