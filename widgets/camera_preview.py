@@ -1303,8 +1303,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
             pw, ph = int(64 * sx), int(80 * sy)
-            # Portrait center: spec 404.5, visually tuned to 404.
-            painter.drawPixmap(int(404.0 * sx - pw / 2), int(51.5 * sy - ph / 2),
+            # Portrait center: spec 404.5, visually tuned to 403.5.
+            painter.drawPixmap(int(403.5 * sx - pw / 2), int(51.5 * sy - ph / 2),
                                portrait.scaled(pw, ph, transformMode=sm))
         painter.drawPixmap(0, 0, frame)
         # CO_DIALOGUE_02: the glass/highlight overlay, mapped over the whole
