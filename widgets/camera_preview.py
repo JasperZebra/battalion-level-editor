@@ -204,7 +204,10 @@ def schedule_messages(raw_messages, clears, background=None):
 
 class CutsceneTimeline(object):
     """One Lua script's camera timeline: timed events + derived shot list."""
-    RE_WAIT = re.compile(r"WaitFor\(\s*([0-9.]+)\s*\)")
+    RE_WAIT = re.compile(r"WaitFor\(\s*([\w.]+)\s*\)")
+    RE_NUM_ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*(-?[0-9.]+)\s*$")
+    # The game blocks cutscene scripts on this until the dialogue queue drains.
+    RE_MSGDRAIN = re.compile(r"until\s+GetNumItemsInMessageQueue")
     RE_SETCAM = re.compile(r"\bSetCamera\(\s*([\w.]+)\s*\)")
     RE_SETWP = re.compile(r"CameraSetWaypoint\(\s*([\w.]+)\s*,\s*([\w.]+)\s*\)")
     RE_SETTARGET = re.compile(r"CameraSetTarget\(\s*([\w.]+)\s*,\s*([\w.]+)\s*\)")
@@ -212,7 +215,8 @@ class CutsceneTimeline(object):
     RE_FADE = re.compile(r"CameraFade\(\s*constant\.(FADE_IN|FADE_OUT)\s*,\s*constant\.(WAIT|NO_WAIT)\s*,\s*([0-9.]+)")
     RE_FOLLOW = re.compile(r"FollowWaypoint\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)")
     RE_FOLLOWUNIT = re.compile(r"FollowUnit\(\s*([\w.]+)\s*,\s*([\w.]+)\s*,")
-    RE_PHONE = re.compile(r"PhoneMessage\(\s*(\d+)\s*,\s*[\w.]+\s*,\s*(-?\d+)\s*,\s*([0-9.]+)\s*,\s*([\w.]+)")
+    # Army arg: BW1 passes a plain integer, BW2 a constant.ARMY_* name.
+    RE_PHONE = re.compile(r"PhoneMessage\(\s*(\d+)\s*,\s*[\w.]+\s*,\s*(?:(-?\d+)|constant\.ARMY_(\w+))\s*,\s*([0-9.]+)\s*,\s*([\w.]+)")
     RE_CLEARQ = re.compile(r"ClearMessageQueue\(")
     RE_GOTO = re.compile(r"GoToArea\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
     RE_TELEPORT = re.compile(r"\bTeleport\(\s*([\w.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)")
@@ -235,9 +239,10 @@ class CutsceneTimeline(object):
     RE_BLOCK_OPEN = re.compile(r"\b(?:if\b.*\bthen|while\b.*\bdo|for\b.*\bdo|function\b)")
     RE_BLOCK_CLOSE = re.compile(r"^\s*end\b")
 
-    def __init__(self, name, text, resolve, owner=None):
+    def __init__(self, name, text, resolve, owner=None, number_vars=None):
         self.name = name
         base_resolve = resolve
+        number_vars = number_vars or {}
 
         def resolve(token):
             # In unit-attached scripts (mpScript), "owner" is the unit itself.
@@ -266,6 +271,7 @@ class CutsceneTimeline(object):
         self._msg_clears = []
         self.camera_first_time = {}  # camera obj -> earliest time it becomes active
         clock = 0.0
+        msg_queue_end = 0.0
         has_camera_op = False
         # Track control-flow nesting: commands inside if/while/for blocks are
         # gameplay-conditional; the game runs every script from level start, so
@@ -382,15 +388,29 @@ class CutsceneTimeline(object):
                     self.vehicle_ops.append((clock, "exit", unit, veh, conditional))
             m = self.RE_PHONE.search(line)
             if m is not None:
-                dur = float(m.group(3))
-                sprite = resolve(m.group(4))
-                self.messages.append((clock, int(m.group(1)), dur if dur > 0 else 5.0,
-                                      sprite, int(m.group(2)), conditional))
+                dur = float(m.group(4))
+                dur = dur if dur > 0 else 5.0
+                sprite = resolve(m.group(5))
+                army = int(m.group(2)) if m.group(2) is not None else m.group(3)
+                self.messages.append((clock, int(m.group(1)), dur,
+                                      sprite, army, conditional))
+                msg_queue_end = max(clock, msg_queue_end) + dur
             if self.RE_CLEARQ.search(line):
                 self._msg_clears.append((clock, conditional))
+                msg_queue_end = clock
+            if self.RE_MSGDRAIN.search(line):
+                # repeat EndFrame() until GetNumItemsInMessageQueue(...) == 0:
+                # the script stalls here while the queued dialogue plays out.
+                clock = max(clock, msg_queue_end)
+            m = self.RE_NUM_ASSIGN.match(line)
+            if m is not None:
+                number_vars[m.group(1)] = float(m.group(2))
             m = self.RE_WAIT.search(line)
             if m is not None:
-                clock += float(m.group(1))
+                try:
+                    clock += float(m.group(1))
+                except ValueError:
+                    clock += number_vars.get(m.group(1), 0.0)
         # Phone messages QUEUE in-game: stacked calls play back to back, each
         # for its own duration; ClearMessageQueue drops not-yet-shown ones.
         self.raw_messages = list(self.messages)
@@ -898,18 +918,29 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             paths = workbench.get_lua_script_paths()
         except Exception:
             return []
+        texts = []
         for path in sorted(paths):
             try:
                 with open(path, "r", errors="replace") as f:
-                    text = f.read()
+                    texts.append((path, f.read()))
             except OSError:
                 continue
+        # Lua globals are shared across scripts: a delay variable may be
+        # assigned in one script and consumed by WaitFor() in another.
+        number_vars = {}
+        for path, text in texts:
+            for line in text.splitlines():
+                m = CutsceneTimeline.RE_NUM_ASSIGN.match(line)
+                if m is not None:
+                    number_vars.setdefault(m.group(1), float(m.group(2)))
+        for path, text in texts:
             # Every script is parsed: non-camera scripts still contribute
             # background unit movement to cutscene playback (the game runs
             # all scripts concurrently from level start).
             scriptname = os.path.splitext(os.path.basename(path))[0]
             timeline = CutsceneTimeline(
-                scriptname, text, resolve, script_owner.get(scriptname))
+                scriptname, text, resolve, script_owner.get(scriptname),
+                dict(number_vars))
             self._all_timelines.append(timeline)
             if timeline.valid:
                 cutscenes.append(timeline)
@@ -1440,7 +1471,11 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         done = getattr(self, "_phone_tex_done", None)
         if done is None:
             done = self._phone_tex_done = set()
-        names = ["CO_DIALOGUE_01", "CO_DIALOGUE_02", "CO_box_lightning"]
+        if self.editor.level_file is not None and self.editor.level_file.bw2:
+            names = ["CO_DIALOGUE_left", "CO_DIALOGUE_mid", "CO_DIALOG_rt",
+                     "CO_DIALOG_lft_hi", "CODIALOGUEflash"]
+        else:
+            names = ["CO_DIALOGUE_01", "CO_DIALOGUE_02", "CO_box_lightning"]
         if self._active_cutscene is not None:
             for entry in self._active_cutscene.messages:
                 tex = self.sprite_texture_name(entry[3])
@@ -1502,14 +1537,20 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 self.msg_label.show()
                 self.msg_label.raise_()  # text/box always on top of the preview
 
-    # Per-army HUD colours (cHUDVariables m*RadarColour): WF, XY, TU, SE, UW.
+    # Per-army HUD colours (cHUDVariables m*RadarColour). BW1 scripts pass the
+    # army as an integer (WF, XY, TU, SE, UW); BW2 as a constant.ARMY_* name.
     ARMY_TINTS = {0: (120, 170, 80), 1: (75, 110, 125), 2: (198, 50, 50),
-                  3: (245, 208, 80), 4: (144, 112, 144)}
+                  3: (245, 208, 80), 4: (144, 112, 144),
+                  "WF": (120, 170, 80), "XYLVANIAN": (30, 110, 220),
+                  "TUNDRAN": (198, 50, 50), "SOLAR": (255, 255, 255),
+                  "UNDERWORLD": (144, 112, 144), "ANGLO": (230, 192, 25)}
 
     def compose_phone_box(self, text, portrait_name, army=0, spark_frame=0):
         """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops,
         mapped in 640x480 screen space per axis so proportions match the game
         at any preview aspect. Returns None if textures aren't cached yet."""
+        if self.editor.level_file is not None and self.editor.level_file.bw2:
+            return self.compose_phone_box_bw2(text, portrait_name, army, spark_frame)
         atlas = self.phone_texture("CO_DIALOGUE_01")
         if atlas is None or atlas.isNull():
             return None
@@ -1585,6 +1626,79 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         # Game text rect (screen 183..492 x, 48..126 y) relative to box origin.
         painter.drawText(QtCore.QRect(int(32.5 * sx), int(10.5 * sy),
                                       int(309 * sx), int(78 * sy)),
+                         int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                         | Qt.TextFlag.TextWordWrap, text)
+        painter.end()
+        return out
+
+    def compose_phone_box_bw2(self, text, portrait_name, army=0, spark_frame=0):
+        """BW2's CO message: a round portrait medallion (CO_DIALOGUE_left disc
+        + CO_DIALOG_lft_hi glass) on the left, with a text bar (CO_DIALOGUE_mid
+        stretched + CO_DIALOG_rt end cap) extending right. Same 640x480
+        per-axis mapping as the BW1 box."""
+        disc = self.phone_texture("CO_DIALOGUE_left")
+        if disc is None or disc.isNull():
+            return None
+        sx = self.glview.width() / 640.0
+        sy = self.glview.height() / 480.0
+        w = int(473.5 * sx)
+        h = int(80 * sy)
+        sm = QtCore.Qt.TransformationMode.SmoothTransformation
+        # Bar layer (behind the medallion), army-tinted like the BW1 frame.
+        bar = QtGui.QPixmap(max(w, 1), max(h, 1))
+        bar.fill(QtCore.Qt.GlobalColor.transparent)
+        bp = QtGui.QPainter(bar)
+        bar_x, bar_y, bar_h = int(72 * sx), int(8 * sy), int(64 * sy)
+        cap = self.phone_texture("CO_DIALOG_rt")
+        cap_w = int(16 * sx)
+        mid = self.phone_texture("CO_DIALOGUE_mid")
+        if mid is not None and not mid.isNull():
+            bp.drawPixmap(bar_x, bar_y, mid.scaled(max(w - bar_x - cap_w, 1), bar_h,
+                                                   transformMode=sm))
+        if cap is not None and not cap.isNull():
+            bp.drawPixmap(w - cap_w, bar_y, cap.scaled(cap_w, bar_h, transformMode=sm))
+        bp.end()
+        tint = self.ARMY_TINTS.get(army)
+        if tint is not None and tint != (255, 255, 255):
+            mask = QtGui.QPixmap(bar)
+            bp = QtGui.QPainter(bar)
+            bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
+            bp.fillRect(0, 0, w, h, QtGui.QColor(*tint))
+            bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
+            bp.drawPixmap(0, 0, mask)
+            bp.end()
+        out = QtGui.QPixmap(max(w, 1), max(h, 1))
+        out.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(out)
+        painter.drawPixmap(0, 0, bar)
+        disc_size = int(80 * sx), int(80 * sy)
+        painter.drawPixmap(0, 0, disc.scaled(*disc_size, transformMode=sm))
+        portrait = self.phone_texture(portrait_name)
+        if portrait is not None and not portrait.isNull():
+            # 64x80 portrait clipped into the medallion circle.
+            painter.save()
+            path = QtGui.QPainterPath()
+            path.addEllipse(5 * sx, 5 * sy, 70 * sx, 70 * sy)
+            painter.setClipPath(path)
+            pw, ph = int(64 * sx), int(80 * sy)
+            painter.drawPixmap(int(8 * sx), 0, portrait.scaled(pw, ph, transformMode=sm))
+            painter.restore()
+        hi = self.phone_texture("CO_DIALOG_lft_hi")
+        if hi is not None and not hi.isNull():
+            painter.drawPixmap(0, 0, hi.scaled(*disc_size, transformMode=sm))
+        # Flash blink at the medallion rim while the message opens.
+        flash = self.phone_texture("CODIALOGUEflash")
+        if spark_frame is not None and flash is not None and not flash.isNull():
+            fw, fh = int(32 * sx), int(32 * sy)
+            painter.drawPixmap(int(66 * sx - fw / 2), int(14 * sy - fh / 2),
+                               flash.scaled(fw, fh, transformMode=sm))
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        font = QtGui.QFont()
+        font.setPixelSize(max(int(14 * sy), 9))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(QtCore.QRect(int(92 * sx), int(8 * sy),
+                                      int(352 * sx), int(64 * sy)),
                          int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                          | Qt.TextFlag.TextWordWrap, text)
         painter.end()

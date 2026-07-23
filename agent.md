@@ -21,6 +21,10 @@
    pushRemote points at a nonexistent remote as a safety latch).
 3. **No Claude/AI attribution in anything GitHub-bound.** Commit messages carry no
    Co-Authored-By trailers or AI mentions; commits use the user's git identity only.
+4. **BW1 <-> BW2 feature parity.** Any feature or fix built for one game MUST also
+   work for the other, in the same change. The games differ in data (texture names,
+   Lua call signatures, XML fields), so verify against BOTH games' real files before
+   calling it done — a shared code path is not proof of parity.
 
 ---
 
