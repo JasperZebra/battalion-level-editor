@@ -1504,9 +1504,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     active = entry
         portrait_ok = (active is not None and
                        self.phone_texture(self.sprite_texture_name(active[3])) is not None)
-        # Lightning: one 7-frame pass at 10fps when the message opens, no loop.
+        # Lightning: one 7-frame pass when the message opens, no loop. BW1's
+        # sheet plays at 10fps; BW2's widget declares frameTime 0.04s (25fps).
         if active is not None:
-            frame = int((self._t - active[0]) * 10)
+            fps = 25.0 if (self.editor.level_file is not None
+                           and self.editor.level_file.bw2) else 10.0
+            frame = int((self._t - active[0]) * fps)
             self._spark_frame = frame if 0 <= frame <= 6 else None
         else:
             self._spark_frame = None
@@ -1632,31 +1635,36 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         return out
 
     def compose_phone_box_bw2(self, text, portrait_name, army=0, spark_frame=0):
-        """BW2's CO message: a round portrait medallion (CO_DIALOGUE_left disc
-        + CO_DIALOG_lft_hi glass) on the left, with a text bar (CO_DIALOGUE_mid
-        stretched + CO_DIALOG_rt end cap) extending right. Same 640x480
-        per-axis mapping as the BW1 box."""
+        """BW2's CO message, per the level's cPanelSprites widget data
+        (mCOBoxLeftSide/Middle/RightSide + mCOBoxLeftSideHigh + mCOLightening):
+        the box is 74 units tall; the disc and its glass highlight use crop
+        (0,0,69,74) of their 80x80 textures; the bar (CO_DIALOGUE_mid stretched
+        + 16-wide CO_DIALOG_rt cap) runs full-height from x=69; the 64x80
+        portrait has its circular vignette baked into its alpha (no clipping)
+        and is centered on the disc, overhanging the box 3px top and bottom."""
         disc = self.phone_texture("CO_DIALOGUE_left")
         if disc is None or disc.isNull():
             return None
         sx = self.glview.width() / 640.0
         sy = self.glview.height() / 480.0
         w = int(473.5 * sx)
-        h = int(80 * sy)
+        h = int(80 * sy)          # canvas: 74-tall box + portrait overhang
+        box_y = int(3 * sy)
+        box_h = int(74 * sy)
         sm = QtCore.Qt.TransformationMode.SmoothTransformation
         # Bar layer (behind the medallion), army-tinted like the BW1 frame.
         bar = QtGui.QPixmap(max(w, 1), max(h, 1))
         bar.fill(QtCore.Qt.GlobalColor.transparent)
         bp = QtGui.QPainter(bar)
-        bar_x, bar_y, bar_h = int(72 * sx), int(8 * sy), int(64 * sy)
+        bar_x = int(69 * sx)
         cap = self.phone_texture("CO_DIALOG_rt")
         cap_w = int(16 * sx)
         mid = self.phone_texture("CO_DIALOGUE_mid")
         if mid is not None and not mid.isNull():
-            bp.drawPixmap(bar_x, bar_y, mid.scaled(max(w - bar_x - cap_w, 1), bar_h,
+            bp.drawPixmap(bar_x, box_y, mid.scaled(max(w - bar_x - cap_w, 1), box_h,
                                                    transformMode=sm))
         if cap is not None and not cap.isNull():
-            bp.drawPixmap(w - cap_w, bar_y, cap.scaled(cap_w, bar_h, transformMode=sm))
+            bp.drawPixmap(w - cap_w, box_y, cap.scaled(cap_w, box_h, transformMode=sm))
         bp.end()
         tint = self.ARMY_TINTS.get(army)
         if tint is not None and tint != (255, 255, 255):
@@ -1671,34 +1679,37 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         out.fill(QtCore.Qt.GlobalColor.transparent)
         painter = QtGui.QPainter(out)
         painter.drawPixmap(0, 0, bar)
-        disc_size = int(80 * sx), int(80 * sy)
-        painter.drawPixmap(0, 0, disc.scaled(*disc_size, transformMode=sm))
+        disc_w, disc_h = int(69 * sx), box_h
+        painter.drawPixmap(0, box_y, disc.copy(0, 0, 69, 74).scaled(
+            disc_w, disc_h, transformMode=sm))
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            # 64x80 portrait clipped into the medallion circle.
-            painter.save()
-            path = QtGui.QPainterPath()
-            path.addEllipse(5 * sx, 5 * sy, 70 * sx, 70 * sy)
-            painter.setClipPath(path)
+            # Centered on the disc circle (~(34.5, 37) in box space); the
+            # vignette in the portrait's alpha keeps it inside the ring.
             pw, ph = int(64 * sx), int(80 * sy)
-            painter.drawPixmap(int(8 * sx), 0, portrait.scaled(pw, ph, transformMode=sm))
-            painter.restore()
+            painter.drawPixmap(int(34.5 * sx - pw / 2), int(3 * sy + 37 * sy - ph / 2),
+                               portrait.scaled(pw, ph, transformMode=sm))
         hi = self.phone_texture("CO_DIALOG_lft_hi")
         if hi is not None and not hi.isNull():
-            painter.drawPixmap(0, 0, hi.scaled(*disc_size, transformMode=sm))
-        # Flash blink at the medallion rim while the message opens.
+            painter.drawPixmap(0, box_y, hi.copy(0, 0, 69, 74).scaled(
+                disc_w, disc_h, transformMode=sm))
+        # Lightning flip-book (CODIALOGUEflash, 3x3 sheet, 7 frames) blinking
+        # at the medallion rim while the message opens.
         flash = self.phone_texture("CODIALOGUEflash")
         if spark_frame is not None and flash is not None and not flash.isNull():
-            fw, fh = int(32 * sx), int(32 * sy)
-            painter.drawPixmap(int(66 * sx - fw / 2), int(14 * sy - fh / 2),
-                               flash.scaled(fw, fh, transformMode=sm))
+            cw, ch = flash.width() // 3, flash.height() // 3
+            fx, fy = spark_frame % 3, spark_frame // 3
+            cell = flash.copy(fx * cw, fy * ch, cw, ch).scaled(
+                int(cw * 3 * sx), int(ch * 3 * sy), transformMode=sm)
+            painter.drawPixmap(int(62 * sx - cell.width() / 2),
+                               int(12 * sy - cell.height() / 2), cell)
         painter.setPen(QtGui.QColor(255, 255, 255))
         font = QtGui.QFont()
         font.setPixelSize(max(int(14 * sy), 9))
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(QtCore.QRect(int(92 * sx), int(8 * sy),
-                                      int(352 * sx), int(64 * sy)),
+        painter.drawText(QtCore.QRect(int(81 * sx), box_y,
+                                      int(365 * sx), box_h),
                          int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                          | Qt.TextFlag.TextWordWrap, text)
         painter.end()
