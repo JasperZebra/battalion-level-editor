@@ -1032,15 +1032,9 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         previous route put the unit at that moment."""
         self._unit_routes = {}
         follows, self._merged_kills = self.gather_movement()
-        # Messages merge across scripts too (all scripts start together);
-        # the global queue orders background dialogue after the cutscene's own.
-        background = []
-        for timeline in self._all_timelines:
-            if timeline is not self._active_cutscene:
-                background.extend(m for m in timeline.raw_messages if not m[5])
-        self._merged_messages = schedule_messages(
-            self._active_cutscene.raw_messages, self._active_cutscene._msg_clears,
-            background)
+        # Dialogue comes from the cutscene's own script only (verified in-game:
+        # background scripts' messages belong to gameplay, not the cutscene).
+        self._merged_messages = None
         bwterrain = self.editor.level_view.bwterrain
         for time, unit, kind, data, speed in follows:
             objid = unit.id
