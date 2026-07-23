@@ -861,6 +861,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._level_ref = level
         self._strings = None
         self._strings_tried = False
+        self._player_army = None
         self._phone_tex_done = set()
         self._phone_pixmaps = {}
         self._camera = None
@@ -944,6 +945,14 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self._all_timelines.append(timeline)
             if timeline.valid:
                 cutscenes.append(timeline)
+        # The player's army = the one whose CO sends the most phone messages
+        # across the whole level (the mission is narrated by your own CO).
+        # Enemy transmissions get the mirrored BW2 box layout.
+        counts = {}
+        for timeline in self._all_timelines:
+            for msg in timeline.raw_messages:
+                counts[msg[4]] = counts.get(msg[4], 0) + 1
+        self._player_army = max(counts, key=counts.get) if counts else None
         return cutscenes
 
     def on_select_update(self):
@@ -1526,9 +1535,14 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 if pixmap is not None:
                     self.msg_label.setStyleSheet("background: transparent;")
                     self.msg_label.setPixmap(pixmap)
-                    # Game layout: box origin (150.5, 37.5) in 640x480 screen space.
-                    self.msg_label.setGeometry(int(self.glview.width() * 150.5 / 640.0),
-                                               int(self.glview.height() * 37.5 / 480.0),
+                    # Box origin in 640x480 screen space: BW1 sits at
+                    # (150.5, 37.5); BW2 boxes hug the top-left corner.
+                    if self.editor.level_file is not None and self.editor.level_file.bw2:
+                        origin_x, origin_y = 12.0, 26.0
+                    else:
+                        origin_x, origin_y = 150.5, 37.5
+                    self.msg_label.setGeometry(int(self.glview.width() * origin_x / 640.0),
+                                               int(self.glview.height() * origin_y / 480.0),
                                                pixmap.width(), pixmap.height())
                 else:
                     self.msg_label.setStyleSheet(
@@ -1542,13 +1556,10 @@ class CameraPreviewWidget(QtWidgets.QWidget):
 
     # BW1 per-army HUD tint (cHUDVariables m*RadarColour), multiplied onto the
     # frame; BW1 scripts pass the army as an integer (WF, XY, TU, SE, UW).
+    # BW2 boxes are NOT army-coloured (verified against in-game screenshots):
+    # every faction gets the same neutral translucent bar.
     ARMY_TINTS = {0: (120, 170, 80), 1: (75, 110, 125), 2: (198, 50, 50),
                   3: (245, 208, 80), 4: (144, 112, 144)}
-    # BW2 bar fill colours per constant.ARMY_* name - the rendered in-game bar
-    # colour (the radar-dot colours in cHUDVariables are NOT what the box uses).
-    BW2_ARMY_COLORS = {"WF": (60, 110, 60), "XYLVANIAN": (30, 60, 80),
-                       "TUNDRAN": (180, 60, 60), "SOLAR": (100, 100, 100),
-                       "UNDERWORLD": (60, 30, 80), "ANGLO": (150, 140, 60)}
 
     def compose_phone_box(self, text, portrait_name, army=0, spark_frame=0):
         """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops,
@@ -1637,93 +1648,100 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         return out
 
     def compose_phone_box_bw2(self, text, portrait_name, army=0, spark_frame=0):
-        """BW2's CO message, per the level's cPanelSprites widget data
-        (mCOBoxLeftSide/Middle/RightSide + mCOBoxLeftSideHigh + mCOLightening):
-        the box is 74 units tall; the disc and its glass highlight use crop
-        (0,0,69,74) of their 80x80 textures; the bar (CO_DIALOGUE_mid stretched
-        + 16-wide CO_DIALOG_rt cap) runs full-height from x=69; the 64x80
-        portrait has its circular vignette baked into its alpha (no clipping)
-        and is centered on the disc, overhanging the box 3px top and bottom."""
+        """BW2's CO message, matched against in-game screenshots: a neutral
+        translucent bar (same for every faction), the CO medallion on the LEFT
+        for the player's army and on the RIGHT for enemy transmissions (bar
+        first, rounded cap on the outer end). Disc/glass use crop (0,0,69,74)
+        of their 80x80 textures; the bar keeps its native 64 height centered
+        on the 74-tall disc; the portrait sits inside the ring, facing the
+        text; text is white with a dark outline."""
         disc = self.phone_texture("CO_DIALOGUE_left")
         if disc is None or disc.isNull():
             return None
+        enemy = (getattr(self, "_player_army", None) is not None
+                 and army != self._player_army)
         sx = self.glview.width() / 640.0
         sy = self.glview.height() / 480.0
-        w = int(473.5 * sx)
+        w = int(500 * sx)
         h = int(80 * sy)          # canvas: 74-tall box + a little headroom
         box_y = int(3 * sy)
         box_h = int(74 * sy)
-        sm = QtCore.Qt.TransformationMode.SmoothTransformation
-        # Bar shape from the mid/cap textures' alpha, tucked under the disc.
-        bar_x = int(60 * sx)
-        shape = QtGui.QPixmap(max(w, 1), max(h, 1))
-        shape.fill(QtCore.Qt.GlobalColor.transparent)
-        bp = QtGui.QPainter(shape)
-        cap = self.phone_texture("CO_DIALOG_rt")
+        bar_h = int(64 * sy)      # native texture height, centered on the disc
+        bar_y = box_y + (box_h - bar_h) // 2
+        disc_w = int(69 * sx)
         cap_w = int(16 * sx)
-        mid = self.phone_texture("CO_DIALOGUE_mid")
-        if mid is not None and not mid.isNull():
-            bp.drawPixmap(bar_x, box_y, mid.scaled(max(w - bar_x - cap_w, 1), box_h,
-                                                   transformMode=sm))
-        if cap is not None and not cap.isNull():
-            bp.drawPixmap(w - cap_w, box_y, cap.scaled(cap_w, box_h, transformMode=sm))
-        bp.end()
-        # In-game the bar is a solid army-coloured fill (~0.8 alpha), with the
-        # gradient texture only providing the sheen. The textures' own alpha is
-        # ~0.4, so stack the shape to build up the mask before colourising.
-        mask = QtGui.QPixmap(shape)
-        bp = QtGui.QPainter(mask)
-        bp.drawPixmap(0, 0, shape)
-        bp.drawPixmap(0, 0, shape)
-        bp.end()
-        color = self.BW2_ARMY_COLORS.get(army, (100, 100, 100))
-        bar = QtGui.QPixmap(max(w, 1), max(h, 1))
-        bar.fill(QtCore.Qt.GlobalColor.transparent)
-        bp = QtGui.QPainter(bar)
-        bp.fillRect(0, 0, w, h, QtGui.QColor(*color))
-        bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
-        bp.drawPixmap(0, 0, mask)
-        bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
-        bp.drawPixmap(0, 0, shape)  # gradient sheen on top of the fill
-        bp.end()
+        disc_x = (w - disc_w) if enemy else 0
+        sm = QtCore.Qt.TransformationMode.SmoothTransformation
         out = QtGui.QPixmap(max(w, 1), max(h, 1))
         out.fill(QtCore.Qt.GlobalColor.transparent)
         painter = QtGui.QPainter(out)
+        # Bar: mid gradient stretched from under the disc to the cap on the
+        # outer end (cap mirrored for the enemy layout). Drawn twice - the
+        # texture alpha is ~0.4 but the in-game bar reads closer to ~0.65.
+        mid = self.phone_texture("CO_DIALOGUE_mid")
+        cap = self.phone_texture("CO_DIALOG_rt")
+        bar = QtGui.QPixmap(max(w, 1), max(h, 1))
+        bar.fill(QtCore.Qt.GlobalColor.transparent)
+        bp = QtGui.QPainter(bar)
+        if enemy:
+            if cap is not None and not cap.isNull():
+                bp.drawPixmap(0, bar_y, cap.transformed(QtGui.QTransform().scale(-1, 1))
+                              .scaled(cap_w, bar_h, transformMode=sm))
+            if mid is not None and not mid.isNull():
+                bp.drawPixmap(cap_w, bar_y, mid.scaled(
+                    max(w - int(60 * sx) - cap_w, 1), bar_h, transformMode=sm))
+        else:
+            if mid is not None and not mid.isNull():
+                bp.drawPixmap(int(60 * sx), bar_y, mid.scaled(
+                    max(w - int(60 * sx) - cap_w, 1), bar_h, transformMode=sm))
+            if cap is not None and not cap.isNull():
+                bp.drawPixmap(w - cap_w, bar_y, cap.scaled(cap_w, bar_h, transformMode=sm))
+        bp.end()
         painter.drawPixmap(0, 0, bar)
-        disc_w, disc_h = int(69 * sx), box_h
-        painter.drawPixmap(0, box_y, disc.copy(0, 0, 69, 74).scaled(
-            disc_w, disc_h, transformMode=sm))
+        painter.drawPixmap(0, 0, bar)
+        painter.drawPixmap(disc_x, box_y, disc.copy(0, 0, 69, 74).scaled(
+            disc_w, box_h, transformMode=sm))
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            # Portrait sits INSIDE the ring (~49x61 of the authored 64x80),
-            # mirrored so the CO faces the text, centered on the disc circle.
-            pw, ph = int(49 * sx), int(61 * sy)
-            flipped = portrait.transformed(QtGui.QTransform().scale(-1, 1))
-            painter.drawPixmap(int(34.5 * sx - pw / 2), int((3 + 36) * sy - ph / 2),
-                               flipped.scaled(pw, ph, transformMode=sm))
+            # Inside the ring, facing the text: the source art faces slightly
+            # left, so the friendly (left-side) portrait is mirrored.
+            pw, ph = int(52 * sx), int(65 * sy)
+            if not enemy:
+                portrait = portrait.transformed(QtGui.QTransform().scale(-1, 1))
+            painter.drawPixmap(int(disc_x + 34.5 * sx - pw / 2),
+                               int((3 + 36) * sy - ph / 2),
+                               portrait.scaled(pw, ph, transformMode=sm))
         hi = self.phone_texture("CO_DIALOG_lft_hi")
         if hi is not None and not hi.isNull():
-            painter.drawPixmap(0, box_y, hi.copy(0, 0, 69, 74).scaled(
-                disc_w, disc_h, transformMode=sm))
+            painter.drawPixmap(disc_x, box_y, hi.copy(0, 0, 69, 74).scaled(
+                disc_w, box_h, transformMode=sm))
         # Lightning flip-book (CODIALOGUEflash, 3x3 sheet, 7 frames) blinking
-        # at the medallion rim while the message opens.
+        # at the medallion's outer top rim while the message opens.
         flash = self.phone_texture("CODIALOGUEflash")
         if spark_frame is not None and flash is not None and not flash.isNull():
             cw, ch = flash.width() // 3, flash.height() // 3
             fx, fy = spark_frame % 3, spark_frame // 3
             cell = flash.copy(fx * cw, fy * ch, cw, ch).scaled(
                 int(cw * 3 * sx), int(ch * 3 * sy), transformMode=sm)
-            painter.drawPixmap(int(62 * sx - cell.width() / 2),
+            flash_x = (disc_x + int(7 * sx)) if enemy else (disc_x + int(62 * sx))
+            painter.drawPixmap(int(flash_x - cell.width() / 2),
                                int(12 * sy - cell.height() / 2), cell)
-        painter.setPen(QtGui.QColor(255, 255, 255))
+        # White text with a dark outline, like the game's comic lettering.
         font = QtGui.QFont()
         font.setPixelSize(max(int(14 * sy), 9))
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(QtCore.QRect(int(81 * sx), box_y,
-                                      int(365 * sx), box_h),
-                         int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                         | Qt.TextFlag.TextWordWrap, text)
+        if enemy:
+            rect = QtCore.QRect(int(24 * sx), bar_y, w - int((24 + 85) * sx), bar_h)
+        else:
+            rect = QtCore.QRect(int(81 * sx), bar_y, w - int((81 + 24) * sx), bar_h)
+        flags = (int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                 | Qt.TextFlag.TextWordWrap)
+        painter.setPen(QtGui.QColor(45, 45, 45))
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
+            painter.drawText(rect.translated(dx, dy), flags, text)
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        painter.drawText(rect, flags, text)
         painter.end()
         return out
 
