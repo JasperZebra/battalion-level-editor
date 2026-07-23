@@ -1672,7 +1672,7 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         h = int(97 * sy)
         # Full 80x80 disc texture drawn square (ring content dia ~77 of 80).
         disc_w, disc_h = int(76 * sx), int(76 * sy)
-        disc_cx = (w - 57 * sx) if enemy else 57 * sx
+        disc_cx = (w - 75 * sx) if enemy else 75 * sx
         disc_cy = 56 * sy
         bar_h = int(64 * sy)      # native texture height, centered on the disc
         bar_y = int(disc_cy - bar_h / 2)
@@ -1748,9 +1748,9 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         font.setBold(True)
         painter.setFont(font)
         if enemy:
-            rect = QtCore.QRect(int(20 * sx), bar_y, w - int((20 + 137) * sx), bar_h)
+            rect = QtCore.QRect(int(20 * sx), bar_y, w - int((20 + 155) * sx), bar_h)
         else:
-            rect = QtCore.QRect(int(137 * sx), bar_y, w - int((137 + 20) * sx), bar_h)
+            rect = QtCore.QRect(int(155 * sx), bar_y, w - int((155 + 20) * sx), bar_h)
         flags = (int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                  | Qt.TextFlag.TextWordWrap)
         painter.setPen(QtGui.QColor(45, 45, 45))
