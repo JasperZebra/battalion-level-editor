@@ -1663,12 +1663,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         sx = self.glview.width() / 640.0
         sy = self.glview.height() / 480.0
         w = int(500 * sx)
-        h = int(88 * sy)
-        # Medallion drawn slightly larger than its authored 69x74 crop so the
-        # CO head stays inside the ring; everything hangs off its center.
-        disc_w, disc_h = int(76 * sx), int(81 * sy)
-        disc_cx = (w - 38 * sx) if enemy else 38 * sx
-        disc_cy = 44 * sy
+        h = int(82 * sy)
+        # Medallion at its authored 69x74 crop size; everything hangs off its
+        # center, with margin so nothing clips at the canvas edges.
+        disc_w, disc_h = int(69 * sx), int(74 * sy)
+        disc_cx = (w - 37 * sx) if enemy else 37 * sx
+        disc_cy = 41 * sy
         bar_h = int(64 * sy)      # native texture height, centered on the disc
         bar_y = int(disc_cy - bar_h / 2)
         cap_w = int(16 * sx)
@@ -1701,20 +1701,18 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         bp.end()
         painter.drawPixmap(0, 0, bar)
         painter.drawPixmap(0, 0, bar)
-        # Layering per the game: ring (disc + glass) ABOVE the bar, CO head
-        # ABOVE the ring.
+        # Layering: bar first, the ring ABOVE it, the CO head ABOVE the ring.
+        # (CO_DIALOG_lft_hi is the HIGHLIGHTED-state ring variant, not an
+        # overlay - drawing it on top of the normal ring is wrong.)
         disc_pos = (int(disc_cx - disc_w / 2), int(disc_cy - disc_h / 2))
         painter.drawPixmap(*disc_pos, disc.copy(0, 0, 69, 74).scaled(
             disc_w, disc_h, transformMode=sm))
-        hi = self.phone_texture("CO_DIALOG_lft_hi")
-        if hi is not None and not hi.isNull():
-            painter.drawPixmap(*disc_pos, hi.copy(0, 0, 69, 74).scaled(
-                disc_w, disc_h, transformMode=sm))
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            # Topmost, facing the text (source art faces slightly left, so the
-            # friendly left-side portrait is mirrored), nudged 0.75 right.
-            pw, ph = int(52 * sx), int(65 * sy)
+            # Topmost and large - the baked vignette blends it over the ring.
+            # Facing the text (source art faces slightly left, so the friendly
+            # left-side portrait is mirrored), nudged 0.75 right.
+            pw, ph = int(62 * sx), int(77 * sy)
             if not enemy:
                 portrait = portrait.transformed(QtGui.QTransform().scale(-1, 1))
             painter.drawPixmap(int(disc_cx + 0.75 * sx - pw / 2),
