@@ -1540,13 +1540,15 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 self.msg_label.show()
                 self.msg_label.raise_()  # text/box always on top of the preview
 
-    # Per-army HUD colours (cHUDVariables m*RadarColour). BW1 scripts pass the
-    # army as an integer (WF, XY, TU, SE, UW); BW2 as a constant.ARMY_* name.
+    # BW1 per-army HUD tint (cHUDVariables m*RadarColour), multiplied onto the
+    # frame; BW1 scripts pass the army as an integer (WF, XY, TU, SE, UW).
     ARMY_TINTS = {0: (120, 170, 80), 1: (75, 110, 125), 2: (198, 50, 50),
-                  3: (245, 208, 80), 4: (144, 112, 144),
-                  "WF": (120, 170, 80), "XYLVANIAN": (30, 110, 220),
-                  "TUNDRAN": (198, 50, 50), "SOLAR": (255, 255, 255),
-                  "UNDERWORLD": (144, 112, 144), "ANGLO": (230, 192, 25)}
+                  3: (245, 208, 80), 4: (144, 112, 144)}
+    # BW2 bar fill colours per constant.ARMY_* name - the rendered in-game bar
+    # colour (the radar-dot colours in cHUDVariables are NOT what the box uses).
+    BW2_ARMY_COLORS = {"WF": (60, 110, 60), "XYLVANIAN": (30, 60, 80),
+                       "TUNDRAN": (180, 60, 60), "SOLAR": (100, 100, 100),
+                       "UNDERWORLD": (60, 30, 80), "ANGLO": (150, 140, 60)}
 
     def compose_phone_box(self, text, portrait_name, army=0, spark_frame=0):
         """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops,
@@ -1648,15 +1650,15 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         sx = self.glview.width() / 640.0
         sy = self.glview.height() / 480.0
         w = int(473.5 * sx)
-        h = int(80 * sy)          # canvas: 74-tall box + portrait overhang
+        h = int(80 * sy)          # canvas: 74-tall box + a little headroom
         box_y = int(3 * sy)
         box_h = int(74 * sy)
         sm = QtCore.Qt.TransformationMode.SmoothTransformation
-        # Bar layer (behind the medallion), army-tinted like the BW1 frame.
-        bar = QtGui.QPixmap(max(w, 1), max(h, 1))
-        bar.fill(QtCore.Qt.GlobalColor.transparent)
-        bp = QtGui.QPainter(bar)
-        bar_x = int(69 * sx)
+        # Bar shape from the mid/cap textures' alpha, tucked under the disc.
+        bar_x = int(60 * sx)
+        shape = QtGui.QPixmap(max(w, 1), max(h, 1))
+        shape.fill(QtCore.Qt.GlobalColor.transparent)
+        bp = QtGui.QPainter(shape)
         cap = self.phone_texture("CO_DIALOG_rt")
         cap_w = int(16 * sx)
         mid = self.phone_texture("CO_DIALOGUE_mid")
@@ -1666,15 +1668,24 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         if cap is not None and not cap.isNull():
             bp.drawPixmap(w - cap_w, box_y, cap.scaled(cap_w, box_h, transformMode=sm))
         bp.end()
-        tint = self.ARMY_TINTS.get(army)
-        if tint is not None and tint != (255, 255, 255):
-            mask = QtGui.QPixmap(bar)
-            bp = QtGui.QPainter(bar)
-            bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
-            bp.fillRect(0, 0, w, h, QtGui.QColor(*tint))
-            bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
-            bp.drawPixmap(0, 0, mask)
-            bp.end()
+        # In-game the bar is a solid army-coloured fill (~0.8 alpha), with the
+        # gradient texture only providing the sheen. The textures' own alpha is
+        # ~0.4, so stack the shape to build up the mask before colourising.
+        mask = QtGui.QPixmap(shape)
+        bp = QtGui.QPainter(mask)
+        bp.drawPixmap(0, 0, shape)
+        bp.drawPixmap(0, 0, shape)
+        bp.end()
+        color = self.BW2_ARMY_COLORS.get(army, (100, 100, 100))
+        bar = QtGui.QPixmap(max(w, 1), max(h, 1))
+        bar.fill(QtCore.Qt.GlobalColor.transparent)
+        bp = QtGui.QPainter(bar)
+        bp.fillRect(0, 0, w, h, QtGui.QColor(*color))
+        bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
+        bp.drawPixmap(0, 0, mask)
+        bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
+        bp.drawPixmap(0, 0, shape)  # gradient sheen on top of the fill
+        bp.end()
         out = QtGui.QPixmap(max(w, 1), max(h, 1))
         out.fill(QtCore.Qt.GlobalColor.transparent)
         painter = QtGui.QPainter(out)
@@ -1684,11 +1695,12 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             disc_w, disc_h, transformMode=sm))
         portrait = self.phone_texture(portrait_name)
         if portrait is not None and not portrait.isNull():
-            # Centered on the disc circle (~(34.5, 37) in box space); the
-            # vignette in the portrait's alpha keeps it inside the ring.
-            pw, ph = int(64 * sx), int(80 * sy)
-            painter.drawPixmap(int(34.5 * sx - pw / 2), int(3 * sy + 37 * sy - ph / 2),
-                               portrait.scaled(pw, ph, transformMode=sm))
+            # Portrait sits INSIDE the ring (~49x61 of the authored 64x80),
+            # mirrored so the CO faces the text, centered on the disc circle.
+            pw, ph = int(49 * sx), int(61 * sy)
+            flipped = portrait.transformed(QtGui.QTransform().scale(-1, 1))
+            painter.drawPixmap(int(34.5 * sx - pw / 2), int((3 + 36) * sy - ph / 2),
+                               flipped.scaled(pw, ph, transformMode=sm))
         hi = self.phone_texture("CO_DIALOG_lft_hi")
         if hi is not None and not hi.isNull():
             painter.drawPixmap(0, box_y, hi.copy(0, 0, 69, 74).scaled(
