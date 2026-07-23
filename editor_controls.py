@@ -168,7 +168,7 @@ class PluginEventClickAction(ClickAction):
         worldx, worldy = editor.mouse_coord_to_world_coord(x, y)
         editor.plugin_handler.execute_event("world_click", editor, worldx, worldy)
 
-        height = editor.bwterrain.check_height(worldx, worldy)
+        height = editor.bwterrain.check_height(worldx, worldy) if editor.bwterrain is not None else None
         if height is None:
             height = editor.waterheight
         editor.plugin_handler.execute_event("terrain_click_2d", editor, Vector3(worldx, worldy, height))
