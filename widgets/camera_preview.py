@@ -10,6 +10,7 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 
 from lib.bw_types import BWMatrix
+from widgets.bw_bitmap_font import BWBitmapFont
 
 
 # Camera POV preview for cutscene cameras (cCamera), shown in the Main side tab.
@@ -864,6 +865,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         self._player_army = None
         self._phone_tex_done = set()
         self._phone_pixmaps = {}
+        self._dialogue_font = None
+        self._dialogue_font_tried = False
         self._camera = None
         self._chain = None
         self._target_chain = None
@@ -1620,6 +1623,53 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             return (int(colour.x), int(colour.y), int(colour.z))
         return None
 
+    # Generic per-menu font used when the current level has no matching
+    # SP_*/MP*.btf of its own (e.g. non-mission levels).
+    DIALOGUE_FONT_FALLBACK = "frontend2"
+
+    def _dialogue_font_paths(self):
+        """(btf_path, wdf_path) for the current BW2 level's own dialogue
+        font (Data/font/<level name>.btf, matching its .wdf width table),
+        falling back to a generic menu font if the level doesn't have one -
+        see widgets/bw_bitmap_font.py for why this only works for BW2."""
+        file_menu = getattr(self.editor, "file_menu", None)
+        base = getattr(file_menu, "current_path", None) if file_menu else None
+        if not base:
+            return None
+        data_path = os.path.dirname(os.path.dirname(base))
+        font_dir = os.path.join(data_path, "font")
+        fname = os.path.basename(base)
+        name = None
+        for suffix in ("_Level.xml.gz", "_Level.xml"):
+            if fname.endswith(suffix):
+                name = fname[:-len(suffix)]
+                break
+        for candidate in (name, self.DIALOGUE_FONT_FALLBACK):
+            if candidate is None:
+                continue
+            btf_path = os.path.join(font_dir, candidate + ".btf")
+            if os.path.exists(btf_path):
+                wdf_path = os.path.join(font_dir, candidate + ".wdf")
+                return btf_path, (wdf_path if os.path.exists(wdf_path) else None)
+        return None
+
+    def _get_dialogue_font(self):
+        """Lazily-built, cached BWBitmapFont for the current level's real
+        CO dialogue font (BW2 only). Returns None (QFont fallback) if the
+        files can't be found or fail to decode."""
+        if self._dialogue_font_tried:
+            return self._dialogue_font
+        self._dialogue_font_tried = True
+        try:
+            paths = self._dialogue_font_paths()
+            if paths is not None:
+                btf_path, wdf_path = paths
+                self._dialogue_font = BWBitmapFont.load(btf_path, wdf_path)
+        except Exception:
+            traceback.print_exc()
+            self._dialogue_font = None
+        return self._dialogue_font
+
     def compose_phone_box(self, text, portrait_name, army=0, spark_frame=0):
         """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops,
         mapped in 640x480 screen space per axis so proportions match the game
@@ -1813,24 +1863,35 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             flash_x = disc_cx + (-26 * sx if enemy else 26 * sx)
             painter.drawPixmap(int(flash_x - cell.width() / 2),
                                int(disc_cy - 26 * sy - cell.height() / 2), cell)
-        # White text with a dark outline; the game letters in a hand-drawn
-        # comic font (Chisel), Comic Sans is the closest stock match. Starts
-        # 80px right of the disc center (mTextPos 105 - mLeftSidePos 25).
-        font = QtGui.QFont("Comic Sans MS")
-        font.setPixelSize(max(int(14 * sy), 9))
-        font.setBold(True)
-        painter.setFont(font)
+        # Text starts 80px right of the disc center (mTextPos 105 -
+        # mLeftSidePos 25). White with a dark outline for readability over
+        # the busy preview background, same as the game's own subtitle style.
         if enemy:
             rect = QtCore.QRect(int(20 * sx), bar_y, w - int((20 + 121) * sx), bar_h)
         else:
             rect = QtCore.QRect(int(121 * sx), bar_y, w - int((121 + 20) * sx), bar_h)
-        flags = (int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                 | Qt.TextFlag.TextWordWrap)
-        painter.setPen(QtGui.QColor(45, 45, 45))
-        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
-            painter.drawText(rect.translated(dx, dy), flags, text)
-        painter.setPen(QtGui.QColor(255, 255, 255))
-        painter.drawText(rect, flags, text)
+        bwfont = self._get_dialogue_font()
+        if bwfont is not None:
+            font_scale = (14 * sy) / bwfont.glyph_height
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
+                bwfont.draw_text(painter, rect.translated(dx, dy), text,
+                                 QtGui.QColor(45, 45, 45), scale=font_scale)
+            bwfont.draw_text(painter, rect, text, QtGui.QColor(255, 255, 255), scale=font_scale)
+        else:
+            # No real font available for this level (see _get_dialogue_font) -
+            # fall back to a stock font approximating the game's hand-drawn
+            # comic ("Chisel") look.
+            font = QtGui.QFont("Comic Sans MS")
+            font.setPixelSize(max(int(14 * sy), 9))
+            font.setBold(True)
+            painter.setFont(font)
+            flags = (int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                     | Qt.TextFlag.TextWordWrap)
+            painter.setPen(QtGui.QColor(45, 45, 45))
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
+                painter.drawText(rect.translated(dx, dy), flags, text)
+            painter.setPen(QtGui.QColor(255, 255, 255))
+            painter.drawText(rect, flags, text)
         painter.end()
         return out
 
