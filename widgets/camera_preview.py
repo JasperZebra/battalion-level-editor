@@ -1587,10 +1587,38 @@ class CameraPreviewWidget(QtWidgets.QWidget):
 
     # BW1 per-army HUD tint (cHUDVariables m*RadarColour), multiplied onto the
     # frame; BW1 scripts pass the army as an integer (WF, XY, TU, SE, UW).
-    # BW2 boxes are NOT army-coloured (verified against in-game screenshots):
-    # every faction gets the same neutral translucent bar.
     ARMY_TINTS = {0: (120, 170, 80), 1: (75, 110, 125), 2: (198, 50, 50),
                   3: (245, 208, 80), 4: (144, 112, 144)}
+
+    # constant.ARMY_* string (what PhoneMessage passes) -> the cHUDVariables
+    # field holding that army's HUD/radar colour. Field NAMES are fixed by
+    # the game's own reflection data; the RGB values themselves are read
+    # live from the loaded level's cHUDVariables object (see
+    # _army_radar_colour_bw2), not hardcoded, since nothing guarantees every
+    # level ships identical constants (mSERadarColour/mNuetralRadarColour
+    # already differ slightly between e.g. SP_1.1 and SP_0.1/MP1).
+    ARMY_RADAR_FIELD_BW2 = {"WF": "mWFRadarColour", "XYLVANIAN": "mXYRadarColour",
+                            "TUNDRAN": "mTURadarColour", "SOLAR": "mSERadarColour",
+                            "UNDERWORLD": "mUWRadarColour", "ANGLO": "mAGRadarColour",
+                            "NEUTRAL": "mNuetralRadarColour"}
+
+    def _army_radar_colour_bw2(self, army):
+        """Read cHUDVariables.m<Army>RadarColour from the loaded level -
+        the same per-army HUD colour BW1's ARMY_TINTS is sourced from,
+        looked up live instead of copied into source, since level authors
+        can (and do) tweak these per level."""
+        field = self.ARMY_RADAR_FIELD_BW2.get(army)
+        level = getattr(self.editor, "level_file", None)
+        if field is None or level is None:
+            return None
+        for obj in level.objects.values():
+            if getattr(obj, "type", None) != "cHUDVariables":
+                continue
+            colour = getattr(obj, field, None)
+            if colour is None:
+                return None
+            return (int(colour.x), int(colour.y), int(colour.z))
+        return None
 
     def compose_phone_box(self, text, portrait_name, army=0, spark_frame=0):
         """Assemble the CO dialogue box from the CO_DIALOGUE_01 atlas crops,
@@ -1680,10 +1708,13 @@ class CameraPreviewWidget(QtWidgets.QWidget):
 
     def compose_phone_box_bw2(self, text, portrait_name, army=0, spark_frame=0):
         """BW2's CO message, measured off in-game SP_1.1 screenshots
-        (Pictures/Screenshots 2026-07-23 151544/151614/151629): a neutral
-        translucent bar (same for every faction), the CO medallion on the LEFT
-        for the player's army and on the RIGHT for enemy transmissions (bar
-        first, rounded cap on the outer end). The disc texture is drawn WHOLE
+        (Pictures/Screenshots 2026-07-23 151544/151614/151629): a translucent
+        bar tinted by the speaking army's cHUDVariables RadarColour, read
+        live from the loaded level (see _army_radar_colour_bw2 - Solar's own
+        colour is near-white, which is why a Solar transmission's bar looks
+        "neutral"), the CO medallion on the LEFT for the player's army and
+        on the RIGHT for enemy transmissions (bar first, rounded cap on the
+        outer end). The disc texture is drawn WHOLE
         (its sSpriteBasetype UVs are stale atlas coords; cropping at 69 slices
         the ring), kept circular at 76x76. The CO head is drawn 1.2x the ring
         diameter, bottom-aligned with the ring's bottom rim, unclipped - in
@@ -1736,6 +1767,16 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             if cap is not None and not cap.isNull():
                 bp.drawPixmap(w - cap_w, bar_y, cap.scaled(cap_w, bar_h, transformMode=sm))
         bp.end()
+        tint = self._army_radar_colour_bw2(army)
+        if tint is not None:
+            # Capture the untinted bar as the alpha mask BEFORE tinting.
+            mask = QtGui.QPixmap(bar)
+            bp = QtGui.QPainter(bar)
+            bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Multiply)
+            bp.fillRect(0, 0, w, h, QtGui.QColor(*tint))
+            bp.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_DestinationIn)
+            bp.drawPixmap(0, 0, mask)
+            bp.end()
         painter.drawPixmap(0, 0, bar)
         painter.drawPixmap(0, 0, bar)
         # Layering: bar first, the ring above it, the glass-shine arc on the
