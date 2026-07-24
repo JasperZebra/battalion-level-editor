@@ -945,15 +945,45 @@ class CameraPreviewWidget(QtWidgets.QWidget):
             self._all_timelines.append(timeline)
             if timeline.valid:
                 cutscenes.append(timeline)
-        # The player's army = the one whose CO sends the most phone messages
-        # across the whole level (the mission is narrated by your own CO).
-        # Enemy transmissions get the mirrored BW2 box layout.
-        counts = {}
-        for timeline in self._all_timelines:
-            for msg in timeline.raw_messages:
-                counts[msg[4]] = counts.get(msg[4], 0) + 1
-        self._player_army = max(counts, key=counts.get) if counts else None
+        # The player's army: read from cLevelSettings.mPlayerArmy1, the
+        # level's own authoritative field (confirmed via SP_1.1 = Solar
+        # Empire, SP_3.2 = Anglo Isles - the campaign switches playable
+        # factions per chapter, so "whoever talks most" is NOT a safe proxy:
+        # SP_3.2's antagonist Windsor (Anglo) sends far more PhoneMessages
+        # than the player's own CO, which used to misclassify Anglo as the
+        # friendly army there. Falls back to the old message-count heuristic
+        # only when the field is absent (BW1) or eNoArmy/eNeutral.
+        self._player_army = self._level_settings_player_army()
+        if self._player_army is None:
+            counts = {}
+            for timeline in self._all_timelines:
+                for msg in timeline.raw_messages:
+                    counts[msg[4]] = counts.get(msg[4], 0) + 1
+            self._player_army = max(counts, key=counts.get) if counts else None
         return cutscenes
+
+    # eArmy enum value (cLevelSettings.mPlayerArmy1) -> constant.ARMY_* name
+    # (the string PhoneMessage's army arg parses to). DOL/Lua-verified sets:
+    # eArmy has WesternFrontier/Xylvanian/TundranTerritories/SolarEmpire/
+    # UnderWorld/AngloIsles/Neutral/NoArmy; PhoneMessage only ever passes
+    # WF/XYLVANIAN/TUNDRAN/SOLAR/UNDERWORLD/ANGLO (grepped across all BW2
+    # levels' Lua) - Neutral/NoArmy campaigns have no player-army box side.
+    PLAYER_ARMY_ENUM = {
+        "eWesternFrontier": "WF", "eXylvanian": "XYLVANIAN",
+        "eTundranTerritories": "TUNDRAN", "eSolarEmpire": "SOLAR",
+        "eUnderWorld": "UNDERWORLD", "eAngloIsles": "ANGLO",
+    }
+
+    def _level_settings_player_army(self):
+        preload = getattr(self.editor, "preload_file", None)
+        if preload is None:
+            return None
+        for obj in preload.objects.values():
+            if getattr(obj, "type", None) != "cLevelSettings":
+                continue
+            enumval = getattr(obj, "mPlayerArmy1", None)
+            return self.PLAYER_ARMY_ENUM.get(enumval)
+        return None
 
     def on_select_update(self):
         self.check_level()
