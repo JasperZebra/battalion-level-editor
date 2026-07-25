@@ -123,8 +123,9 @@ class WaypointChain(object):
 
 class UnitRoute(object):
     """A scripted unit movement: walk a polyline at a speed."""
-    def __init__(self, start_time, start_pos, points, speed, fixed_dir=None):
+    def __init__(self, start_time, start_pos, points, speed, fixed_dir=None, ground_follow=True):
         self.fixed_dir = fixed_dir
+        self.ground_follow = ground_follow
         self.start_time = start_time
         self.speed = speed if speed > 0.01 else 5.0
         self.points = [start_pos] + list(points)
@@ -1254,7 +1255,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                     start_pos, vpos = pos_at(unit, time), pos_at(veh, time)
                     if start_pos is None or vpos is None:
                         continue
-                    route = UnitRoute(time, start_pos, [vpos], 7.0)
+                    route = UnitRoute(time, start_pos, [vpos], 7.0,
+                                       ground_follow=unit.type != "cAirVehicle")
                     self._unit_routes.setdefault(unit.id, []).append(route)
                     in_vehicle[unit.id] = veh
                     passengers.setdefault(veh.id, []).append(unit)
@@ -1284,7 +1286,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                             y = terrain_y
                     direction = (math.sin(ang), math.cos(ang))
                     self._unit_routes.setdefault(exiting.id, []).append(
-                        UnitRoute(time, (x, y, z), [(x, y, z)], 1e9, direction))
+                        UnitRoute(time, (x, y, z), [(x, y, z)], 1e9, direction,
+                                  ground_follow=exiting.type != "cAirVehicle"))
                     extra_spawns.append((time, exiting, True))
                     in_vehicle.pop(exiting.id, None)
                     if veh is not None and exiting in passengers.get(veh.id, ()):
@@ -1339,7 +1342,8 @@ class CameraPreviewWidget(QtWidgets.QWidget):
                 points = [(x, y, z)]
             if not points:
                 continue
-            routes.append(UnitRoute(time, start_pos, points, speed, fixed_dir))
+            routes.append(UnitRoute(time, start_pos, points, speed, fixed_dir,
+                                     ground_follow=unit.type != "cAirVehicle"))
         spawns.extend(extra_spawns)
         spawns.sort(key=lambda e: e[0])
         self._merged_spawns = spawns
@@ -1350,13 +1354,22 @@ class CameraPreviewWidget(QtWidgets.QWidget):
         if self._active_cutscene is None or not self._unit_routes:
             return {}
         overrides = {}
+        bwterrain = getattr(self.editor.level_view, "bwterrain", None)
         for objid, routes in self._unit_routes.items():
             active = None
             for route in routes:
                 if route.start_time <= self._t:
                     active = route
             if active is not None:
-                overrides[objid] = active.sample(self._t)
+                pos, direction = active.sample(self._t)
+                # Route endpoints are terrain-snapped when built, but the straight
+                # line between them isn't - ride the ground in between too, same
+                # as the camera does, so units don't clip through hills mid-walk.
+                if bwterrain is not None and active.ground_follow:
+                    ground = bwterrain.check_height(pos[0], pos[2])
+                    if ground is not None:
+                        pos = (pos[0], ground, pos[2])
+                overrides[objid] = (pos, direction)
         return overrides
 
     def killed_units(self):
