@@ -11,6 +11,7 @@ except: # cElementTree not available
     import xml.etree.ElementTree as etree
 
 from lib.searchquery import fieldnames
+from lib.bw import attachments
 
 from numpy import array, float32
 #import xml.etree.ElementTree.Element as Element
@@ -718,6 +719,7 @@ class BattalionObject(object):
     def updatemodelname(self):
         self._modelname = None
         self._iconoffset = None
+        self._attachments = attachments.object_attachments(self)
         if hasattr(self, "mBase") and self.mBase is not None:
             if hasattr(self.mBase, "mpModel"):
                 model = self.mBase.mpModel
@@ -927,6 +929,12 @@ class BattalionObject(object):
     @property
     def modelname(self):
         return self._modelname
+
+    @property
+    def attachments(self):
+        """[(slot, modelname)] of separately-stored models that render with this object:
+        vehicle tracks and infantry helmet/weapon/backpack."""
+        return getattr(self, "_attachments", ())
 
     @property
     def iconoffset(self):

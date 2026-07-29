@@ -7,6 +7,7 @@ from lib.vectors import Vector3
 from lib.render.model_renderingv2 import LineDrawing
 from typing import TYPE_CHECKING
 from lib.bw_types import BWMatrix
+from lib.bw import attachments
 from plugins.plugin_scenery_render import SceneryHandler, SceneryComponent
 
 if TYPE_CHECKING:
@@ -120,8 +121,9 @@ class Graphics(object):
         self.rw.models.camera.mtxdirty = True
         self.rw.models.billboard.mtxdirty = True
         for modelname in modelnames:
-            model = self.rw.bwmodelhandler.instancemodels[modelname]
-            model.mtxdirty = True
+            model = self.rw.bwmodelhandler.instancemodels.get(modelname)
+            if model is not None:
+                model.mtxdirty = True
 
         self._dirty = True
 
@@ -168,6 +170,29 @@ class Graphics(object):
                   0, 0, 1)
 
         rw.camera_direction = Vector3(look_direction.x * fac, look_direction.y * fac, look_direction.z)
+
+    def add_attachments(self, obj, modelname, currmtx):
+        """Queue the models that are stored separately from the object's main model: ground
+        vehicle tracks (authored in hull space, so they use the hull matrix) and infantry
+        helmet/weapon/backpack (authored in their attach node's frame)."""
+        instancemodels = self.rw.bwmodelhandler.instancemodels
+        attachpoints = None
+
+        for slot, attachname in obj.attachments:
+            if attachname not in instancemodels:
+                continue
+            if slot == "track":
+                self.scene.add_matrix(attachname, currmtx)
+                continue
+
+            if attachpoints is None:
+                attachpoints = self.rw.bwmodelhandler.attachpoints.get(modelname, {})
+            attachmtx = attachpoints.get(slot)
+            if attachmtx is not None:
+                self.scene.add_matrix(attachname, attachments.accessory_matrix(
+                    slot, attachmtx, currmtx,
+                    self.rw.bwmodelhandler.bounds(modelname),
+                    self.rw.bwmodelhandler.bounds(attachname)))
 
     def render_select(self, objlist):
         rw = self.rw
@@ -346,6 +371,7 @@ class Graphics(object):
                     if (obj.type != "cSceneryCluster"
                             or scenery_simple and obj not in selected_scenery):
                         self.scene.add_matrix(modelname, currmtx)
+                        self.add_attachments(obj, modelname, currmtx)
 
                 flag = 0
                 if obj in selected:

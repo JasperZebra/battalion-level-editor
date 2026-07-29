@@ -920,11 +920,13 @@ class BolMapViewer(QtOpenGLWidgets.QOpenGLWidget):
                 for obj in self.selected:
                     if obj.modelname is not None:
                         modelnames.add(obj.modelname)
+                        modelnames.update(name for _, name in obj.attachments)
 
             elif forcespecific:
                 for obj in forcespecific:
                     if obj.modelname is not None:
                         modelnames.add(obj.modelname)
+                        modelnames.update(name for _, name in obj.attachments)
             self.graphics.set_dirty_limited(modelnames)
             self._lastrendertime = 0
             #self.update()
