@@ -10,6 +10,7 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 
 from lib.bw_types import BWMatrix
+from lib.bw import attachments
 
 
 # Camera POV preview for cutscene cameras (cCamera), shown in the Main side tab.
@@ -650,6 +651,12 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
         self._render_dynamic(lv, campos, handler, overrides, killed, dynamic_ids)
         glDisable(GL_TEXTURE_2D)
 
+    def _render_attachments(self, handler, obj, modelname, currmtx):
+        """Vehicle tracks and infantry helmet/weapon/backpack are separate models; draw them
+        with their unit so the preview frames a complete vehicle or soldier."""
+        for attachname, mtx in attachments.instances(handler, obj, modelname, currmtx):
+            handler.rendermodel(attachname, mtx, None, 0)
+
     def _draw_statics(self, handler, dynamic_ids, compile_list):
         vismenu = getattr(self.editor.level_view, "visibility_menu", None)
         for objid, obj in self.editor.level_file.objects_with_positions.items():
@@ -670,6 +677,7 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             if obj.type == "cTroop":
                 BWMatrix.static_rotate_y(currmtx, math.pi)
             handler.rendermodel(modelname, currmtx, None, 0)
+            self._render_attachments(handler, obj, modelname, currmtx)
         # Full scenery: reuse the main view's SceneryHandler scatter (same
         # RNG-accurate distribution) when its toggle is on.
         if vismenu is not None and vismenu.show_full_scenery():
@@ -719,6 +727,7 @@ class CameraPreviewGL(QtOpenGLWidgets.QOpenGLWidget):
             if obj.type == "cTroop":
                 BWMatrix.static_rotate_y(currmtx, math.pi)
             handler.rendermodel(modelname, currmtx, None, 0)
+            self._render_attachments(handler, obj, modelname, currmtx)
         glDisable(GL_TEXTURE_2D)
 
     def _render_water(self, lv):

@@ -172,27 +172,11 @@ class Graphics(object):
         rw.camera_direction = Vector3(look_direction.x * fac, look_direction.y * fac, look_direction.z)
 
     def add_attachments(self, obj, modelname, currmtx):
-        """Queue the models that are stored separately from the object's main model: ground
-        vehicle tracks (authored in hull space, so they use the hull matrix) and infantry
-        helmet/weapon/backpack (authored in their attach node's frame)."""
-        instancemodels = self.rw.bwmodelhandler.instancemodels
-        attachpoints = None
-
-        for slot, attachname in obj.attachments:
-            if attachname not in instancemodels:
-                continue
-            if slot == "track":
-                self.scene.add_matrix(attachname, currmtx)
-                continue
-
-            if attachpoints is None:
-                attachpoints = self.rw.bwmodelhandler.attachpoints.get(modelname, {})
-            attachmtx = attachpoints.get(slot)
-            if attachmtx is not None:
-                self.scene.add_matrix(attachname, attachments.accessory_matrix(
-                    slot, attachmtx, currmtx,
-                    self.rw.bwmodelhandler.bounds(modelname),
-                    self.rw.bwmodelhandler.bounds(attachname)))
+        """Queue the models stored separately from the object's main model: vehicle tracks
+        and infantry helmet/weapon/backpack."""
+        for attachname, mtx in attachments.instances(self.rw.bwmodelhandler, obj,
+                                                     modelname, currmtx):
+            self.scene.add_matrix(attachname, mtx)
 
     def render_select(self, objlist):
         rw = self.rw

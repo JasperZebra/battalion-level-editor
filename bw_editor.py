@@ -30,6 +30,7 @@ import opengltext
 import py_obj
 from lib.lua.luaworkshop import LuaWorkbench
 from lib.bw_types import BWMatrix
+from lib.bw import attachments
 from lib.vectors import Vector3
 from widgets.menu.menubar import EditorMenuBar
 from widgets.editor_widgets import catch_exception
@@ -579,7 +580,7 @@ class LevelEditor(QMainWindow):
                 currmtx = mtx.mtx.copy()
                 currmtx[13] = obj.height
                 if selectedmodel is not None:
-                    temp_scene.append((selectedmodel, currmtx))
+                    temp_scene.append((obj, selectedmodel, currmtx))
                     midx += currmtx[12]
                     midy += currmtx[13]
                     midz += currmtx[14]
@@ -590,7 +591,7 @@ class LevelEditor(QMainWindow):
             avgy = midy / count
             avgz = midz / count
 
-            for model, mtx in temp_scene:
+            for obj, model, mtx in temp_scene:
                 mtx[12] = mtx[12] - avgx
                 mtx[13] = mtx[13] - avgy
                 mtx[14] = mtx[14] - avgz
@@ -611,6 +612,11 @@ class LevelEditor(QMainWindow):
                     mtx[11] = 0.0
 
                 self.mini_model_viewer.add_to_scene(model, mtx)
+                # tracks / helmet / weapon / backpack, placed off the same matrix so they
+                # follow the identity rotation used for a single selection
+                for attachname, attachmtx in attachments.instances(
+                        editor.level_view.bwmodelhandler, obj, model, mtx):
+                    self.mini_model_viewer.add_to_scene(attachname, attachmtx)
 
             angle = pi / 4.0
             if len(editor.level_view.selected) == 1:

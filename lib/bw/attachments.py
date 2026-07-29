@@ -229,6 +229,27 @@ def _seat_on_attach_point(matrix, bounds):
     return seated
 
 
+def instances(handler, obj, modelname, objectmatrix):
+    """Yield (modelname, matrix) for every extra model that renders with `obj` -- its tracks
+    or its helmet/weapon/backpack. Shared by the viewport and the preview widgets so they
+    assemble units the same way. `handler` is the BWModelHandler."""
+    points = None
+    for slot, attachname in obj.attachments:
+        if attachname not in handler.models:
+            continue
+        if slot == "track":
+            yield attachname, objectmatrix          # authored in hull space
+            continue
+
+        if points is None:
+            points = handler.attachpoints.get(modelname, {})
+        attachmatrix = points.get(slot)
+        if attachmatrix is not None:
+            yield attachname, accessory_matrix(slot, attachmatrix, objectmatrix,
+                                               handler.bounds(modelname),
+                                               handler.bounds(attachname))
+
+
 def accessory_matrix(slot, attachmatrix, objectmatrix, bodybounds, accessorybounds):
     """Instance matrix for one accessory. `bodybounds`/`accessorybounds` are model space
     (minx, miny, minz, maxx, maxy, maxz) boxes, or None when unknown."""
